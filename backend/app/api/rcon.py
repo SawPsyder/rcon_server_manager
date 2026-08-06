@@ -21,7 +21,7 @@ from app.schemas import (
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
 from app.server_types.sandstorm import build_travel_command, map_gamemodes, parse_listbans
 from app.services.ban_cache import load_cached_bans, remove_cached_ban, replace_server_bans
-from app.services.identity import resolve_names, steam_api_configured
+from app.services.identity import steam_api_configured
 from app.services.player_records import log_player_action
 from app.services.rcon import RconError, run_rcon
 
