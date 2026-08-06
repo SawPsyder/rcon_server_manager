@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Local runtime data & secrets (never commit)
+data/
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+.encryption_key
+**/.encryption_key
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Built SPA copied into backend (Docker multi-stage builds this)
+backend/app/static/
+
+# Reverse-engineered / third-party reference material (local only)
+_isrt_src/
+_source/
+_source/**
+*.exe
+*.pyd
+*.dll
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Build / temp / coverage
+*.log
+.coverage
+htmlcov/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

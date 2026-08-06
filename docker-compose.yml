@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: rcon-manager-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rcon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rcon}
+      POSTGRES_DB: ${POSTGRES_DB:-rcon_manager}
+    volumes:
+      - rcon_manager_pgdata:/var/lib/postgresql/data
+    ports:
+      # Optional host access for tools / local uvicorn against Docker Postgres
+      - "${POSTGRES_PUBLISH_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  rcon-manager:
+    build: .
+    image: rcon-server-manager:local
+    container_name: rcon-manager
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      DATA_DIR: /data
+      SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-false}
+      # Build SQLAlchemy URL from these (see app.config). Optional full override:
+      # DATABASE_URL: postgresql+psycopg://user:pass@db:5432/rcon_manager
+      DATABASE_URL: ${DATABASE_URL:-}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-rcon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rcon}
+      POSTGRES_DB: ${POSTGRES_DB:-rcon_manager}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+    volumes:
+      # Encryption key file and optional local artifacts (SQL lives in Postgres)
+      - rcon_manager_data:/data
+
+volumes:
+  rcon_manager_data:
+  rcon_manager_pgdata:

@@ -1,0 +1,37 @@
+**/.git
+**/.github
+**/.venv
+**/venv
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Local secrets & databases
+**/.env
+**/.env.*
+**/.encryption_key
+**/data
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+
+# Reverse-engineering / ISRT reference (must never enter the image)
+_source
+_source/**
+_isrt_src
+_isrt_src/**
+
+# Frontend build artifacts (built in Docker stage)
+frontend/dist
+frontend/node_modules
+backend/app/static
+
+# Docs / tooling not needed in runtime image
+*.md
+!README.md
+scripts
+**/.DS_Store
+**/Thumbs.db

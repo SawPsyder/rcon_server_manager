@@ -1,0 +1,84 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.deps import require_admin
+from app.models import Setting
+from app.schemas import SettingsOut, SettingsUpdate, TypeSettingsOut
+from app.server_types import list_server_types
+from app.server_types.sandstorm import DEFAULT_PREFERRED_GAMEMODE
+
+router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+
+def _get(db: Session, key: str, default: str) -> str:
+    row = db.query(Setting).filter(Setting.key == key).first()
+    return row.value if row else default
+
+
+def _set(db: Session, key: str, value: str) -> None:
+    row = db.query(Setting).filter(Setting.key == key).first()
+    if row:
+        row.value = value
+    else:
+        db.add(Setting(key=key, value=value))
+
+
+def _type_preferred_key(type_id: str) -> str:
+    return f"type.{type_id}.preferred_gamemode"
+
+
+def _type_settings(db: Session) -> dict[str, TypeSettingsOut]:
+    out: dict[str, TypeSettingsOut] = {}
+    for info in list_server_types():
+        default = DEFAULT_PREFERRED_GAMEMODE if info.id == "sandstorm" else ""
+        # fall back to legacy global key for sandstorm
+        val = _get(db, _type_preferred_key(info.id), "")
+        if not val and info.id == "sandstorm":
+            val = _get(db, "preferred_gamemode", default)
+        out[info.id] = TypeSettingsOut(preferred_gamemode=val or default)
+    return out
+
+
+@router.get("", response_model=SettingsOut)
+def get_settings_api(db: Session = Depends(get_db), _admin: str = Depends(require_admin)) -> SettingsOut:
+    return SettingsOut(
+        query_timeout=float(_get(db, "query_timeout", "2.0")),
+        poll_interval_seconds=int(_get(db, "poll_interval_seconds", "10")),
+        stats_interval_seconds=int(_get(db, "stats_interval_seconds", "60")),
+        types=_type_settings(db),
+    )
+
+
+@router.put("", response_model=SettingsOut)
+def update_settings(
+    body: SettingsUpdate,
+    db: Session = Depends(get_db),
+    _admin: str = Depends(require_admin),
+) -> SettingsOut:
+    if body.query_timeout is not None:
+        _set(db, "query_timeout", str(body.query_timeout))
+    if body.poll_interval_seconds is not None:
+        _set(db, "poll_interval_seconds", str(body.poll_interval_seconds))
+    if body.stats_interval_seconds is not None:
+        _set(db, "stats_interval_seconds", str(body.stats_interval_seconds))
+    if body.types:
+        known = {t.id for t in list_server_types()}
+        for type_id, ts in body.types.items():
+            if type_id not in known:
+                raise HTTPException(status_code=400, detail=f"Unknown server type: {type_id}")
+            if ts.preferred_gamemode is not None:
+                _set(db, _type_preferred_key(type_id), ts.preferred_gamemode.strip())
+    db.commit()
+    return get_settings_api(db, _admin)
+
+
+def resolve_preferred_gamemode(db: Session, server_type: str, server_override: str | None) -> str:
+    if server_override and server_override.strip():
+        return server_override.strip()
+    typed = _get(db, _type_preferred_key(server_type), "")
+    if typed:
+        return typed
+    if server_type == "sandstorm":
+        return _get(db, "preferred_gamemode", DEFAULT_PREFERRED_GAMEMODE)
+    return ""
