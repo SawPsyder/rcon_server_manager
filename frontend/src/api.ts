@@ -6,12 +6,18 @@ export type ServerFeatures = {
   a2s_query: boolean;
 };
 
+export type QuickButton = {
+  label: string;
+  command: string;
+};
+
 export type ServerTypeInfo = {
   id: string;
   label: string;
   default_query_port: number;
   default_rcon_port: number;
   features: ServerFeatures;
+  quick_buttons: QuickButton[];
 };
 
 export type Server = {
@@ -94,15 +100,6 @@ export type MapConfig = {
   lightings: string[];
 };
 
-export type CustomButton = {
-  id: number;
-  label: string;
-  command: string;
-  sort_order: number;
-  server_type?: string;
-  server_id?: number | null;
-};
-
 export type RconResult = {
   command: string;
   response: string;
@@ -140,12 +137,6 @@ export type PlayerStats = {
   current_players: number | null;
   peak_players: number | null;
   avg_players: number | null;
-};
-
-export type ButtonDraft = {
-  label: string;
-  command: string;
-  sort_order?: number;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -289,25 +280,6 @@ export const api = {
         ? `/api/gamemode-labels?server_type=${encodeURIComponent(serverType)}`
         : "/api/gamemode-labels"
     ),
-  buttons: (serverType = "sandstorm") =>
-    request<CustomButton[]>(`/api/buttons?server_type=${encodeURIComponent(serverType)}`),
-  serverButtons: (serverId: number) =>
-    request<CustomButton[]>(`/api/servers/${serverId}/buttons`),
-  replaceServerButtons: (serverId: number, buttons: ButtonDraft[]) =>
-    request<CustomButton[]>(`/api/servers/${serverId}/buttons`, {
-      method: "PUT",
-      body: JSON.stringify({ buttons }),
-    }),
-  replaceTypeButtons: (serverType: string, buttons: ButtonDraft[]) =>
-    request<CustomButton[]>(`/api/buttons/type/${encodeURIComponent(serverType)}`, {
-      method: "PUT",
-      body: JSON.stringify({ buttons }),
-    }),
-  updateButton: (id: number, data: { label: string; command: string }) =>
-    request<CustomButton>(`/api/buttons/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
   settings: () => request<AppSettings>("/api/settings"),
   updateSettings: (data: Partial<AppSettings>) =>
     request<AppSettings>("/api/settings", {

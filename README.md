@@ -24,7 +24,8 @@ Local development without Docker can still use **SQLite** (default when `DATABAS
 - Type-aware player list, kick/ban, map travel (Sandstorm)
 - **Persistent RCON connections** (avoids Sandstorm per-connect thread leak)
 - RCON console with per-type command allowlist
-- Hybrid config: type defaults + optional per-server overrides
+- Hybrid config: type defaults + optional per-server preferred gamemode
+- Hardcoded per-type quick RCON buttons (List Players, List Bans, List Maps, Restart Round for Sandstorm)
 
 ## Branches & releases
 

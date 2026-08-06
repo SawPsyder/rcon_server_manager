@@ -1,14 +1,14 @@
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AdminAuth, CustomButton, MapConfig, Setting
+from app.models import AdminAuth, MapConfig, Setting
 from app.security import hash_password
 from app.seed_data import (
     CUSTOM_CHECKPOINT_MAPS,
     VANILLA_CHECKPOINT_MAPS,
     checkpoint_scenario,
 )
-from app.server_types.sandstorm import DEFAULT_BUTTONS, DEFAULT_PREFERRED_GAMEMODE
+from app.server_types.sandstorm import DEFAULT_PREFERRED_GAMEMODE
 
 
 def ensure_admin(db: Session) -> None:
@@ -45,24 +45,6 @@ def seed_if_empty(db: Session) -> None:
                     checkpoint=checkpoint_scenario(alias, "security"),
                     checkpoint_ins=checkpoint_scenario(alias, "insurgents"),
                     self_added=True,
-                )
-            )
-
-    # Type-default buttons (server_id is null)
-    type_default_count = (
-        db.query(CustomButton)
-        .filter(CustomButton.server_type == "sandstorm", CustomButton.server_id.is_(None))
-        .count()
-    )
-    if type_default_count == 0 and db.query(CustomButton).count() == 0:
-        for label, command, order in DEFAULT_BUTTONS:
-            db.add(
-                CustomButton(
-                    label=label,
-                    command=command,
-                    sort_order=order,
-                    server_type="sandstorm",
-                    server_id=None,
                 )
             )
 

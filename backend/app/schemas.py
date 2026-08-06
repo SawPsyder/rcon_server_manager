@@ -24,12 +24,18 @@ class ServerFeaturesOut(BaseModel):
     a2s_query: bool = True
 
 
+class QuickButtonOut(BaseModel):
+    label: str
+    command: str
+
+
 class ServerTypeOut(BaseModel):
     id: str
     label: str
     default_query_port: int
     default_rcon_port: int
     features: ServerFeaturesOut
+    quick_buttons: list[QuickButtonOut] = Field(default_factory=list)
 
 
 class ServerCreate(BaseModel):
@@ -179,38 +185,6 @@ class MapOut(BaseModel):
     lightings: list[str]
 
     model_config = {"from_attributes": True}
-
-
-class CustomButtonOut(BaseModel):
-    id: int
-    label: str
-    command: str
-    sort_order: int
-    server_type: str = "sandstorm"
-    server_id: int | None = None
-
-    model_config = {"from_attributes": True}
-
-
-class CustomButtonUpdate(BaseModel):
-    label: str = Field(min_length=1, max_length=64)
-    command: str = Field(min_length=1, max_length=512)
-
-
-class CustomButtonCreate(BaseModel):
-    label: str = Field(min_length=1, max_length=64)
-    command: str = Field(min_length=1, max_length=512)
-    sort_order: int = 0
-
-
-class ServerButtonsReplace(BaseModel):
-    """Replace per-server button overrides. Empty list clears overrides (inherit type defaults)."""
-
-    buttons: list[CustomButtonCreate] = Field(default_factory=list)
-
-
-class TypeButtonsReplace(BaseModel):
-    buttons: list[CustomButtonCreate] = Field(default_factory=list)
 
 
 class CommandHistoryOut(BaseModel):

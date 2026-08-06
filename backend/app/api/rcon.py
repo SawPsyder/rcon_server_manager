@@ -1,25 +1,22 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.servers import get_rcon_password, get_server_or_404, resolve_buttons
+from app.api.servers import get_rcon_password, get_server_or_404
 from app.config import get_settings
 from app.database import get_db
 from app.deps import require_admin
-from app.models import CommandHistory, CustomButton, MapConfig
+from app.models import CommandHistory, MapConfig
 from app.schemas import (
     AdminSayRequest,
     CommandHistoryOut,
-    CustomButtonOut,
-    CustomButtonUpdate,
     PlayerActionRequest,
     RconCommandRequest,
     RconCommandResponse,
     TravelPreview,
     TravelRequest,
-    TypeButtonsReplace,
     UnbanRequest,
 )
-from app.server_types import DEFAULT_SERVER_TYPE, get_adapter, is_known_type
+from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
 from app.server_types.sandstorm import build_travel_command, map_gamemodes
 from app.services.rcon import RconError, run_rcon
 
@@ -214,68 +211,3 @@ def command_history(
         .all()
     )
     return rows
-
-
-@router.get("/api/buttons", response_model=list[CustomButtonOut])
-def list_type_default_buttons(
-    server_type: str = DEFAULT_SERVER_TYPE,
-    db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
-) -> list[CustomButtonOut]:
-    """Type-default quick buttons (server_id is null)."""
-    st = server_type.strip().lower() or DEFAULT_SERVER_TYPE
-    if not is_known_type(st):
-        raise HTTPException(status_code=400, detail=f"Unknown server type: {server_type}")
-    return (
-        db.query(CustomButton)
-        .filter(CustomButton.server_type == st, CustomButton.server_id.is_(None))
-        .order_by(CustomButton.sort_order.asc())
-        .all()
-    )
-
-
-@router.put("/api/buttons/type/{server_type}", response_model=list[CustomButtonOut])
-def replace_type_buttons(
-    server_type: str,
-    body: TypeButtonsReplace,
-    db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
-) -> list[CustomButtonOut]:
-    st = server_type.strip().lower()
-    if not is_known_type(st):
-        raise HTTPException(status_code=400, detail=f"Unknown server type: {server_type}")
-    db.query(CustomButton).filter(
-        CustomButton.server_type == st, CustomButton.server_id.is_(None)
-    ).delete()
-    created: list[CustomButton] = []
-    for i, btn in enumerate(body.buttons):
-        row = CustomButton(
-            label=btn.label.strip(),
-            command=btn.command.strip(),
-            sort_order=btn.sort_order if btn.sort_order else i,
-            server_type=st,
-            server_id=None,
-        )
-        db.add(row)
-        created.append(row)
-    db.commit()
-    for row in created:
-        db.refresh(row)
-    return created
-
-
-@router.put("/api/buttons/{button_id}", response_model=CustomButtonOut)
-def update_button(
-    button_id: int,
-    body: CustomButtonUpdate,
-    db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
-) -> CustomButtonOut:
-    row = db.get(CustomButton, button_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Button not found")
-    row.label = body.label.strip()
-    row.command = body.command.strip()
-    db.commit()
-    db.refresh(row)
-    return row

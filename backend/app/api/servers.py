@@ -3,10 +3,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import require_admin
-from app.models import CustomButton, Server
+from app.models import Server
 from app.schemas import (
-    CustomButtonOut,
-    ServerButtonsReplace,
+    QuickButtonOut,
     ServerCreate,
     ServerFeaturesOut,
     ServerOut,
@@ -61,6 +60,10 @@ def server_types(_admin: str = Depends(require_admin)) -> list[ServerTypeOut]:
                 default_query_port=info.default_query_port,
                 default_rcon_port=info.default_rcon_port,
                 features=ServerFeaturesOut(**info.features.to_dict()),
+                quick_buttons=[
+                    QuickButtonOut(label=b.label, command=b.command)
+                    for b in info.quick_buttons
+                ],
             )
         )
     return out
@@ -170,65 +173,6 @@ def delete_server(
     db.delete(server)
     db.commit()
     rcon_pool.invalidate_endpoint(host, port)
-
-
-def resolve_buttons(db: Session, server: Server) -> list[CustomButton]:
-    """Per-server overrides if any; else type defaults."""
-    overrides = (
-        db.query(CustomButton)
-        .filter(CustomButton.server_id == server.id)
-        .order_by(CustomButton.sort_order.asc())
-        .all()
-    )
-    if overrides:
-        return overrides
-    st = server.server_type or DEFAULT_SERVER_TYPE
-    return (
-        db.query(CustomButton)
-        .filter(CustomButton.server_type == st, CustomButton.server_id.is_(None))
-        .order_by(CustomButton.sort_order.asc())
-        .all()
-    )
-
-
-@router.get("/{server_id}/buttons", response_model=list[CustomButtonOut])
-def server_buttons(
-    server_id: int,
-    db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
-) -> list[CustomButtonOut]:
-    server = get_server_or_404(db, server_id)
-    return resolve_buttons(db, server)
-
-
-@router.put("/{server_id}/buttons", response_model=list[CustomButtonOut])
-def replace_server_buttons(
-    server_id: int,
-    body: ServerButtonsReplace,
-    db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
-) -> list[CustomButtonOut]:
-    """
-    Replace per-server button overrides.
-    Empty buttons list removes overrides so type defaults are used.
-    """
-    server = get_server_or_404(db, server_id)
-    db.query(CustomButton).filter(CustomButton.server_id == server.id).delete()
-    created: list[CustomButton] = []
-    for i, btn in enumerate(body.buttons):
-        row = CustomButton(
-            label=btn.label.strip(),
-            command=btn.command.strip(),
-            sort_order=btn.sort_order if btn.sort_order else i,
-            server_type=server.server_type or DEFAULT_SERVER_TYPE,
-            server_id=server.id,
-        )
-        db.add(row)
-        created.append(row)
-    db.commit()
-    for row in created:
-        db.refresh(row)
-    return resolve_buttons(db, server)
 
 
 def get_server_or_404(db: Session, server_id: int) -> Server:

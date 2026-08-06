@@ -3,10 +3,11 @@ import { Link } from "react-router-dom";
 import {
   api,
   AppSettings,
-  CustomButton,
   MapConfig,
+  QuickButton,
   Server,
   ServerStatus,
+  ServerTypeInfo,
 } from "../api";
 import PlayerStatsChart from "../components/PlayerStatsChart";
 
@@ -38,7 +39,7 @@ export default function DashboardPage() {
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [maps, setMaps] = useState<MapConfig[]>([]);
   const [labels, setLabels] = useState<Record<string, string>>({});
-  const [buttons, setButtons] = useState<CustomButton[]>([]);
+  const [serverTypes, setServerTypes] = useState<ServerTypeInfo[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [rconCmd, setRconCmd] = useState("");
   const [output, setOutput] = useState("");
@@ -76,10 +77,20 @@ export default function DashboardPage() {
     return settings?.types?.[st]?.preferred_gamemode || "";
   }, [selectedServer, status, settings]);
 
+  const quickButtons: QuickButton[] = useMemo(() => {
+    const st = selectedServer?.server_type || status?.server_type || "sandstorm";
+    return serverTypes.find((t) => t.id === st)?.quick_buttons || [];
+  }, [selectedServer, status, serverTypes]);
+
   const loadBase = useCallback(async () => {
-    const [sv, st] = await Promise.all([api.listServers(), api.settings()]);
+    const [sv, st, ty] = await Promise.all([
+      api.listServers(),
+      api.settings(),
+      api.serverTypes(),
+    ]);
     setServers(sv);
     setSettings(st);
+    setServerTypes(ty);
 
     const stored = localStorage.getItem(SELECTED_KEY);
     const preferred = stored ? Number(stored) : null;
@@ -93,14 +104,9 @@ export default function DashboardPage() {
   const loadServerExtras = useCallback(async (server: Server) => {
     const st = server.server_type || "sandstorm";
     try {
-      const [mp, lb, bt] = await Promise.all([
-        api.maps(st),
-        api.gamemodeLabels(st),
-        api.serverButtons(server.id),
-      ]);
+      const [mp, lb] = await Promise.all([api.maps(st), api.gamemodeLabels(st)]);
       setMaps(mp);
       setLabels(lb);
-      setButtons(bt);
     } catch (e) {
       setOutput(String(e));
     }
@@ -543,9 +549,9 @@ export default function DashboardPage() {
       <section className="card">
         <h2>RCON console</h2>
         <div className="row wrap">
-          {buttons.map((b) => (
+          {quickButtons.map((b) => (
             <button
-              key={b.id}
+              key={b.command}
               className="btn"
               disabled={busy || !serverId}
               onClick={() => runRcon(b.command, b.label)}

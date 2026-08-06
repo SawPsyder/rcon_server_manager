@@ -1,4 +1,4 @@
-"""Seed maps and default buttons from ISRT defaults."""
+"""Seed maps from ISRT-era defaults (maps only; RCON shortcuts are hardcoded per type)."""
 
 # (alias, map_name, day, night, checkpoint, checkpoint_ins, self_added)
 VANILLA_CHECKPOINT_MAPS = [

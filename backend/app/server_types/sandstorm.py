@@ -7,7 +7,7 @@ import re
 import time
 from typing import Any
 
-from app.server_types.base import ServerFeatures, ServerTypeInfo
+from app.server_types.base import QuickButton, ServerFeatures, ServerTypeInfo
 from app.services.query import QueryError, SourceQuery
 from app.services.rcon import RconError
 
@@ -82,10 +82,12 @@ GAMEMODE_LABELS: dict[str, str] = {
     "ambush": "Ambush",
 }
 
-DEFAULT_BUTTONS = (
-    ("List Bans", "listbans", 0),
-    ("List Maps", "maps", 1),
-    ("Restart Round", "restartround 0", 2),
+# Hardcoded dashboard shortcuts (not user-editable)
+QUICK_BUTTONS = (
+    QuickButton("List Players", "listplayers"),
+    QuickButton("List Bans", "listbans"),
+    QuickButton("List Maps", "maps"),
+    QuickButton("Restart Round", "restartround 0"),
 )
 
 DEFAULT_PREFERRED_GAMEMODE = "checkpoint"
@@ -231,6 +233,7 @@ class SandstormAdapter:
             admin_say=True,
             a2s_query=True,
         ),
+        quick_buttons=QUICK_BUTTONS,
     )
     allowed_rcon_prefixes = ALLOWED_COMMAND_PREFIXES
 

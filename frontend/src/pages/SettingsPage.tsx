@@ -1,31 +1,18 @@
 import { FormEvent, useEffect, useState } from "react";
-import { api, AppSettings, ButtonDraft, CustomButton, ServerTypeInfo } from "../api";
+import { api, AppSettings, ServerTypeInfo } from "../api";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [types, setTypes] = useState<ServerTypeInfo[]>([]);
-  const [typeButtons, setTypeButtons] = useState<Record<string, ButtonDraft[]>>({});
   const [pw, setPw] = useState({ current: "", next: "" });
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
     Promise.all([api.settings(), api.serverTypes()])
-      .then(async ([s, ty]) => {
+      .then(([s, ty]) => {
         setSettings(s);
         setTypes(ty);
-        const buttons: Record<string, ButtonDraft[]> = {};
-        await Promise.all(
-          ty.map(async (t) => {
-            const btns = await api.buttons(t.id);
-            buttons[t.id] = btns.map((b: CustomButton) => ({
-              label: b.label,
-              command: b.command,
-              sort_order: b.sort_order,
-            }));
-          })
-        );
-        setTypeButtons(buttons);
       })
       .catch((e) => setError(String(e)));
   }, []);
@@ -49,31 +36,6 @@ export default function SettingsPage() {
       await api.changePassword(pw.current, pw.next);
       setPw({ current: "", next: "" });
       setMsg("Password updated");
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed");
-    }
-  };
-
-  const saveTypeButtons = async (typeId: string) => {
-    try {
-      const drafts = (typeButtons[typeId] || [])
-        .filter((b) => b.label.trim() && b.command.trim())
-        .map((b, i) => ({
-          label: b.label.trim(),
-          command: b.command.trim(),
-          sort_order: i,
-        }));
-      const updated = await api.replaceTypeButtons(typeId, drafts);
-      setTypeButtons((prev) => ({
-        ...prev,
-        [typeId]: updated.map((b) => ({
-          label: b.label,
-          command: b.command,
-          sort_order: b.sort_order,
-        })),
-      }));
-      setMsg(`Quick buttons saved for ${typeId}`);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
@@ -163,11 +125,14 @@ export default function SettingsPage() {
 
       {types.map((t) => {
         const typeSettings = settings.types?.[t.id] || { preferred_gamemode: "" };
-        const drafts = typeButtons[t.id] || [];
+        if (!t.features.map_travel) return null;
         return (
           <section className="card" key={t.id}>
             <h2>{t.label}</h2>
-            <p className="muted">Type defaults shared by all {t.label} servers (unless overridden per server).</p>
+            <p className="muted">
+              Type defaults for {t.label}. Quick RCON buttons are fixed per server type (not
+              configurable).
+            </p>
             <form
               className="form-grid"
               onSubmit={(e) => {
@@ -175,99 +140,42 @@ export default function SettingsPage() {
                 saveSettings(e);
               }}
             >
-              {t.features.map_travel && (
-                <label className="full">
-                  Preferred gamemode key
-                  <input
-                    value={typeSettings.preferred_gamemode}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        types: {
-                          ...settings.types,
-                          [t.id]: {
-                            ...typeSettings,
-                            preferred_gamemode: e.target.value,
-                          },
+              <label className="full">
+                Preferred gamemode key
+                <input
+                  value={typeSettings.preferred_gamemode}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      types: {
+                        ...settings.types,
+                        [t.id]: {
+                          ...typeSettings,
+                          preferred_gamemode: e.target.value,
                         },
-                      })
-                    }
-                  />
-                </label>
-              )}
-              {t.features.map_travel && (
-                <div className="full">
-                  <button className="btn primary" type="submit">
-                    Save type settings
-                  </button>
-                </div>
-              )}
-            </form>
-
-            <h3 style={{ marginTop: "1.25rem" }}>Default quick RCON buttons</h3>
-            <div className="stack">
-              {drafts.map((btn, idx) => (
-                <div key={idx} className="form-grid compact">
-                  <label>
-                    Label
-                    <input
-                      value={btn.label}
-                      onChange={(e) => {
-                        const next = [...drafts];
-                        next[idx] = { ...next[idx], label: e.target.value };
-                        setTypeButtons({ ...typeButtons, [t.id]: next });
-                      }}
-                    />
-                  </label>
-                  <label>
-                    Command
-                    <input
-                      value={btn.command}
-                      onChange={(e) => {
-                        const next = [...drafts];
-                        next[idx] = { ...next[idx], command: e.target.value };
-                        setTypeButtons({ ...typeButtons, [t.id]: next });
-                      }}
-                    />
-                  </label>
-                  <div className="row">
-                    <button
-                      className="btn small danger"
-                      type="button"
-                      onClick={() =>
-                        setTypeButtons({
-                          ...typeButtons,
-                          [t.id]: drafts.filter((_, i) => i !== idx),
-                        })
-                      }
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              ))}
-              <div className="row">
-                <button
-                  type="button"
-                  className="btn small"
-                  onClick={() =>
-                    setTypeButtons({
-                      ...typeButtons,
-                      [t.id]: [...drafts, { label: "", command: "" }],
+                      },
                     })
                   }
-                >
-                  Add button
-                </button>
-                <button
-                  type="button"
-                  className="btn primary"
-                  onClick={() => saveTypeButtons(t.id)}
-                >
-                  Save buttons
+                />
+              </label>
+              <div className="full">
+                <button className="btn primary" type="submit">
+                  Save type settings
                 </button>
               </div>
-            </div>
+            </form>
+            {t.quick_buttons?.length > 0 && (
+              <div style={{ marginTop: "1rem" }}>
+                <h3>Built-in quick RCON buttons</h3>
+                <ul className="muted" style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem" }}>
+                  {t.quick_buttons.map((b) => (
+                    <li key={b.command}>
+                      <strong>{b.label}</strong> — <code>{b.command}</code>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </section>
         );
       })}

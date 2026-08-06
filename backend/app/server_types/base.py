@@ -19,12 +19,24 @@ class ServerFeatures:
 
 
 @dataclass(frozen=True)
+class QuickButton:
+    """Hardcoded dashboard RCON shortcut for a server type."""
+
+    label: str
+    command: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"label": self.label, "command": self.command}
+
+
+@dataclass(frozen=True)
 class ServerTypeInfo:
     id: str
     label: str
     default_query_port: int
     default_rcon_port: int
     features: ServerFeatures
+    quick_buttons: tuple[QuickButton, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +45,7 @@ class ServerTypeInfo:
             "default_query_port": self.default_query_port,
             "default_rcon_port": self.default_rcon_port,
             "features": self.features.to_dict(),
+            "quick_buttons": [b.to_dict() for b in self.quick_buttons],
         }
 
 

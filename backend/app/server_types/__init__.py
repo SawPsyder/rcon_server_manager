@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.server_types.base import ServerFeatures, ServerTypeAdapter, ServerTypeInfo
+from app.server_types.base import QuickButton, ServerFeatures, ServerTypeAdapter, ServerTypeInfo
 from app.server_types.sandstorm import sandstorm_adapter
 
 DEFAULT_SERVER_TYPE = "sandstorm"
@@ -29,6 +29,7 @@ def is_known_type(type_id: str) -> bool:
 
 __all__ = [
     "DEFAULT_SERVER_TYPE",
+    "QuickButton",
     "ServerFeatures",
     "ServerTypeAdapter",
     "ServerTypeInfo",
