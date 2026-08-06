@@ -7,6 +7,8 @@ type Props = {
   error: string;
   busy: boolean;
   steamLookupEnabled?: boolean;
+  fromCache?: boolean;
+  fetchedAt?: string | null;
   identityFlags?: Record<string, boolean>;
   onRefresh: () => void;
   onUnban: (netId: string) => void;
@@ -22,6 +24,8 @@ export default function BanListPanel({
   error,
   busy,
   steamLookupEnabled,
+  fromCache,
+  fetchedAt,
   identityFlags = {},
   onRefresh,
   onUnban,
@@ -30,13 +34,22 @@ export default function BanListPanel({
   showRaw,
   onToggleRaw,
 }: Props) {
+  const fetchedLabel = (() => {
+    if (!fetchedAt) return null;
+    try {
+      return new Date(fetchedAt).toLocaleString();
+    } catch {
+      return fetchedAt;
+    }
+  })();
+
   return (
     <section className="card">
       <div className="row between wrap">
         <h2 style={{ margin: 0 }}>Banned players</h2>
         <div className="row wrap">
           <button className="btn" type="button" disabled={busy || loading} onClick={onRefresh}>
-            {loading ? "Loading…" : "Refresh bans"}
+            {loading ? "Loading…" : "Refresh from server"}
           </button>
           {raw != null && raw !== "" && (
             <button className="btn ghost" type="button" onClick={onToggleRaw}>
@@ -46,16 +59,26 @@ export default function BanListPanel({
         </div>
       </div>
       <p className="muted" style={{ marginTop: "0.35rem" }}>
-        Parsed from RCON <code>listbans</code>. Resolved names are stored in the local{" "}
-        <code>identity_cache</code> table and reused (no repeated lookups). Steam:{" "}
+        Cached per server in the database. Opening this page uses the cache;{" "}
+        <strong>Refresh from server</strong> runs live <code>listbans</code> and updates the
+        cache.{" "}
+        {fromCache && fetchedLabel ? (
+          <>
+            Showing cache from <strong>{fetchedLabel}</strong>.
+          </>
+        ) : fetchedLabel ? (
+          <>
+            Last fetched <strong>{fetchedLabel}</strong>.
+          </>
+        ) : null}{" "}
+        Steam names:{" "}
         {steamLookupEnabled ? (
-          <>Web API on first sight, then cache.</>
+          <>Web API (identity cache).</>
         ) : (
           <>
-            play history when known — set <code>STEAM_WEB_API_KEY</code> for full persona lookup.
+            local play history — set <code>STEAM_WEB_API_KEY</code> for full lookup.
           </>
-        )}{" "}
-        Epic (EOS) product ids cannot be resolved publicly.
+        )}
       </p>
 
       {error && <div className="alert error">{error}</div>}

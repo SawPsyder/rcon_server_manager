@@ -244,3 +244,40 @@ class PlayerAdminNote(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ServerBanSnapshot(Base):
+    """Per-server cached listbans metadata (raw text + fetch time)."""
+
+    __tablename__ = "server_ban_snapshots"
+
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
+    raw_text: Mapped[str] = mapped_column(Text, default="")
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+
+
+class ServerBanEntry(Base):
+    """Cached ban rows for a server (from last successful listbans)."""
+
+    __tablename__ = "server_ban_entries"
+    __table_args__ = (
+        Index("ix_server_bans_server", "server_id"),
+        UniqueConstraint("server_id", "raw_id", name="uq_server_ban_raw"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
+    )
+    sort_index: Mapped[int] = mapped_column(Integer, default=0)
+    platform: Mapped[str] = mapped_column(String(64), default="")
+    raw_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    net_id: Mapped[str] = mapped_column(String(255), default="")
+    display_id: Mapped[str] = mapped_column(String(255), default="")
+    duration: Mapped[str] = mapped_column(String(128), default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    permanent: Mapped[bool] = mapped_column(Boolean, default=False)

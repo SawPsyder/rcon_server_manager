@@ -60,6 +60,8 @@ export default function DashboardPage() {
   const [bansLoading, setBansLoading] = useState(false);
   const [showBansRaw, setShowBansRaw] = useState(false);
   const [steamLookupEnabled, setSteamLookupEnabled] = useState(false);
+  const [bansFromCache, setBansFromCache] = useState(false);
+  const [bansFetchedAt, setBansFetchedAt] = useState<string | null>(null);
   const [identityFlags, setIdentityFlags] = useState<Record<string, boolean>>({});
   const [dossierOpen, setDossierOpen] = useState(false);
   const [dossierNetId, setDossierNetId] = useState("");
@@ -256,64 +258,72 @@ export default function DashboardPage() {
     setOutput(`[${title}] ${res.command}\n\n${body}`);
   };
 
-  const loadBans = useCallback(async () => {
-    if (!serverId) return;
-    setBansLoading(true);
-    setBansError("");
-    try {
-      const res = await api.bans(serverId);
+  const applyBanList = useCallback(
+    (res: Awaited<ReturnType<typeof api.bans>>) => {
       setSteamLookupEnabled(Boolean(res.steam_lookup_enabled));
+      setBansFromCache(Boolean(res.from_cache));
+      setBansFetchedAt(res.fetched_at || null);
+      setBans(res.bans || []);
+      setBansRaw(res.raw || "");
       if (!res.ok) {
-        setBans([]);
-        setBansRaw(res.raw || "");
         setBansError(res.error || "Failed to load bans");
       } else {
-        setBans(res.bans || []);
-        setBansRaw(res.raw || "");
         setBansError(
           (res.bans || []).length === 0 && res.raw
             ? "Response received but no ban rows could be parsed — try Show raw."
             : ""
         );
-        const ids = (res.bans || []).map((b) => b.raw_id).filter(Boolean);
-        if (ids.length) refreshIdentityFlags(ids);
       }
-    } catch (e) {
+      const ids = (res.bans || []).map((b) => b.raw_id).filter(Boolean);
+      if (ids.length) refreshIdentityFlags(ids);
+    },
+    [refreshIdentityFlags]
+  );
+
+  /** Load bans from DB cache (default) or live RCON when refresh=true. */
+  const loadBans = useCallback(
+    async (refresh = false) => {
+      if (!serverId) return;
+      setBansLoading(true);
+      setBansError("");
+      try {
+        const res = await api.bans(serverId, refresh);
+        applyBanList(res);
+      } catch (e) {
+        setBans([]);
+        setBansError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBansLoading(false);
+      }
+    },
+    [serverId, applyBanList]
+  );
+
+  // Load cached bans when switching server (no live RCON unless empty cache)
+  useEffect(() => {
+    if (!serverId || !features.kick_ban) {
       setBans([]);
-      setBansError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBansLoading(false);
+      setBansRaw("");
+      setBansFetchedAt(null);
+      return;
     }
-  }, [serverId, refreshIdentityFlags]);
+    loadBans(false);
+  }, [serverId, features.kick_ban, loadBans]);
 
   const runRcon = async (command: string, title = "RCON") => {
     if (!serverId) return;
     const cmd = command.trim();
-    // Structured ban UI for listbans shortcut / manual command
-    if (cmd.toLowerCase() === "listbans" || title === "List Bans") {
+    // Manual listbans in console still refreshes the ban cache/table
+    if (cmd.toLowerCase() === "listbans") {
       setBusy(true);
       try {
-        const res = await api.bans(serverId);
-        setSteamLookupEnabled(Boolean(res.steam_lookup_enabled));
-        if (!res.ok) {
-          setBans([]);
-          setBansRaw(res.raw || "");
-          setBansError(res.error || "Failed to load bans");
-          setOutput(`[List Bans] listbans\n\n${res.error || "failed"}`);
-        } else {
-          setBans(res.bans || []);
-          setBansRaw(res.raw || "");
-          setBansError(
-            (res.bans || []).length === 0 && res.raw
-              ? "Response received but no ban rows could be parsed — try Show raw."
-              : ""
-          );
-          setOutput(
-            `[List Bans] listbans\n\nParsed ${(res.bans || []).length} ban(s). See table below.`
-          );
-          const ids = (res.bans || []).map((b) => b.raw_id).filter(Boolean);
-          if (ids.length) refreshIdentityFlags(ids);
-        }
+        const res = await api.bans(serverId, true);
+        applyBanList(res);
+        setOutput(
+          res.ok
+            ? `[List Bans] listbans\n\nCached ${(res.bans || []).length} ban(s). See table below.`
+            : `[List Bans] listbans\n\n${res.error || "failed"}`
+        );
       } catch (e) {
         setBansError(e instanceof Error ? e.message : String(e));
         setOutput(String(e));
@@ -607,23 +617,6 @@ export default function DashboardPage() {
         )}
       </section>
 
-      {features.kick_ban && (
-        <BanListPanel
-          bans={bans}
-          loading={bansLoading}
-          error={bansError}
-          busy={busy}
-          steamLookupEnabled={steamLookupEnabled}
-          identityFlags={identityFlags}
-          onRefresh={loadBans}
-          onUnban={unbanPlayer}
-          onOpenIdentity={openDossier}
-          raw={bansRaw}
-          showRaw={showBansRaw}
-          onToggleRaw={() => setShowBansRaw((v) => !v)}
-        />
-      )}
-
       {features.map_travel && (
         <section className="card">
           <h2>Map travel</h2>
@@ -776,6 +769,25 @@ export default function DashboardPage() {
         )}
         <pre className="console-out">{output || "RCON output will appear here."}</pre>
       </section>
+
+      {features.kick_ban && (
+        <BanListPanel
+          bans={bans}
+          loading={bansLoading}
+          error={bansError}
+          busy={busy}
+          steamLookupEnabled={steamLookupEnabled}
+          fromCache={bansFromCache}
+          fetchedAt={bansFetchedAt}
+          identityFlags={identityFlags}
+          onRefresh={() => loadBans(true)}
+          onUnban={unbanPlayer}
+          onOpenIdentity={openDossier}
+          raw={bansRaw}
+          showRaw={showBansRaw}
+          onToggleRaw={() => setShowBansRaw((v) => !v)}
+        />
+      )}
 
       <IdentityDossierModal
         open={dossierOpen}

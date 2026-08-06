@@ -20,6 +20,7 @@ from app.schemas import (
 )
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
 from app.server_types.sandstorm import build_travel_command, map_gamemodes, parse_listbans
+from app.services.ban_cache import load_cached_bans, remove_cached_ban, replace_server_bans
 from app.services.identity import resolve_names, steam_api_configured
 from app.services.player_records import log_player_action
 from app.services.rcon import RconError, run_rcon
@@ -215,57 +216,90 @@ def unban_player(
         net_id=net_id,
         reason="",
     )
+    if result.ok:
+        try:
+            remove_cached_ban(db, server_id, net_id)
+            db.commit()
+        except Exception:
+            db.rollback()
     return result
 
 
 @router.get("/api/servers/{server_id}/bans", response_model=BanListOut)
 def list_bans(
     server_id: int,
+    refresh: bool = False,
     db: Session = Depends(get_db),
     _admin: str = Depends(require_admin),
 ) -> BanListOut:
-    """Run RCON listbans and return structured rows for the UI."""
+    """
+    Return structured bans for a server.
+
+    Default: serve DB cache (instant). Use ?refresh=true to run live listbans
+    and replace the cache.
+    """
     server = get_server_or_404(db, server_id)
     _require_feature(server, "kick_ban")
+
+    if not refresh:
+        cached = load_cached_bans(db, server_id)
+        if cached.get("has_snapshot"):
+            return BanListOut(
+                server_id=server_id,
+                bans=[BanEntryOut(**b) for b in cached["bans"]],
+                raw=cached.get("raw") or "",
+                ok=bool(cached.get("ok", True)),
+                error=cached.get("error"),
+                steam_lookup_enabled=steam_api_configured(),
+                from_cache=True,
+                fetched_at=cached.get("fetched_at"),
+            )
+        # No cache yet — fall through to live fetch once
+
     result = _exec(db, server_id, "listbans")
     if not result.ok:
+        # Preserve previous cache; only surface the error
+        cached = load_cached_bans(db, server_id)
+        if cached.get("has_snapshot"):
+            return BanListOut(
+                server_id=server_id,
+                bans=[BanEntryOut(**b) for b in cached["bans"]],
+                raw=cached.get("raw") or "",
+                ok=False,
+                error=result.error or "listbans failed",
+                steam_lookup_enabled=steam_api_configured(),
+                from_cache=True,
+                fetched_at=cached.get("fetched_at"),
+            )
         return BanListOut(
             server_id=server_id,
             bans=[],
             raw="",
             ok=False,
             error=result.error or "listbans failed",
+            steam_lookup_enabled=steam_api_configured(),
+            from_cache=False,
+            fetched_at=None,
         )
+
     raw = result.response or ""
     parsed = parse_listbans(raw)
-    names = resolve_names(db, [str(r.get("raw_id") or "") for r in parsed])
-    bans_out: list[BanEntryOut] = []
-    for row in parsed:
-        rid = str(row.get("raw_id") or "")
-        info = names.get(rid) or {}
-        bans_out.append(
-            BanEntryOut(
-                index=int(row.get("index") or 0),
-                platform=str(row.get("platform") or ""),
-                raw_id=rid,
-                net_id=str(row.get("net_id") or rid),
-                display_id=str(row.get("display_id") or rid),
-                duration=str(row.get("duration") or "—"),
-                reason=str(row.get("reason") or "—"),
-                permanent=bool(row.get("permanent")),
-                display_name=str(info.get("display_name") or ""),
-                profile_url=str(info.get("profile_url") or ""),
-                avatar_url=str(info.get("avatar_url") or ""),
-                name_source=str(info.get("source") or ""),
-            )
-        )
+    try:
+        replace_server_bans(db, server_id, parsed=parsed, raw=raw, ok=True, error="")
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    cached = load_cached_bans(db, server_id)
     return BanListOut(
         server_id=server_id,
-        bans=bans_out,
-        raw=raw,
+        bans=[BanEntryOut(**b) for b in cached["bans"]],
+        raw=cached.get("raw") or raw,
         ok=True,
         error=None,
         steam_lookup_enabled=steam_api_configured(),
+        from_cache=False,
+        fetched_at=cached.get("fetched_at"),
     )
 
 

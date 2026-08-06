@@ -232,6 +232,9 @@ class BanListOut(BaseModel):
     ok: bool = True
     error: str | None = None
     steam_lookup_enabled: bool = False
+    # True when payload came from DB cache (not a live listbans)
+    from_cache: bool = False
+    fetched_at: datetime | None = None
 
 
 class AdminSayRequest(BaseModel):

@@ -129,6 +129,8 @@ export type BanList = {
   ok: boolean;
   error?: string | null;
   steam_lookup_enabled?: boolean;
+  from_cache?: boolean;
+  fetched_at?: string | null;
 };
 
 export type PlayerActionLog = {
@@ -329,7 +331,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ net_id }),
     }),
-  bans: (id: number) => request<BanList>(`/api/servers/${id}/bans`),
+  bans: (id: number, refresh = false) =>
+    request<BanList>(
+      `/api/servers/${id}/bans${refresh ? "?refresh=true" : ""}`
+    ),
 
   identityFlags: (identities: { platform?: string; external_id?: string; net_id?: string; steamid?: string }[]) =>
     request<{ flags: Record<string, boolean> }>("/api/identities/flags", {
