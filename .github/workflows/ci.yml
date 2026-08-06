@@ -11,6 +11,7 @@ on:
     branches:
       - develop
       - master
+  workflow_dispatch:
 
 # Only keep the latest run per branch/PR — older ones are cancelled instead of
 # sitting queued until the 15m "failure" timeout (common with rapid pushes).
