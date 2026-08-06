@@ -9,8 +9,13 @@ type Props = {
   steamLookupEnabled?: boolean;
   fromCache?: boolean;
   fetchedAt?: string | null;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
   identityFlags?: Record<string, boolean>;
   onRefresh: () => void;
+  onPageChange: (page: number) => void;
   onUnban: (netId: string) => void;
   onOpenIdentity: (netId: string, name?: string) => void;
   raw?: string;
@@ -26,8 +31,13 @@ export default function BanListPanel({
   steamLookupEnabled,
   fromCache,
   fetchedAt,
+  page,
+  pageSize,
+  total,
+  totalPages,
   identityFlags = {},
   onRefresh,
+  onPageChange,
   onUnban,
   onOpenIdentity,
   raw,
@@ -42,6 +52,9 @@ export default function BanListPanel({
       return fetchedAt;
     }
   })();
+
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
 
   return (
     <section className="card">
@@ -59,12 +72,11 @@ export default function BanListPanel({
         </div>
       </div>
       <p className="muted" style={{ marginTop: "0.35rem" }}>
-        Cached per server in the database. Opening this page uses the cache;{" "}
-        <strong>Refresh from server</strong> runs live <code>listbans</code> and updates the
-        cache.{" "}
+        Cached per server. Default view is the cache;{" "}
+        <strong>Refresh from server</strong> runs live <code>listbans</code>.{" "}
         {fromCache && fetchedLabel ? (
           <>
-            Showing cache from <strong>{fetchedLabel}</strong>.
+            Cache from <strong>{fetchedLabel}</strong>.
           </>
         ) : fetchedLabel ? (
           <>
@@ -73,10 +85,10 @@ export default function BanListPanel({
         ) : null}{" "}
         Steam names:{" "}
         {steamLookupEnabled ? (
-          <>Web API (identity cache).</>
+          <>Web API + local identity cache.</>
         ) : (
           <>
-            local play history — set <code>STEAM_WEB_API_KEY</code> for full lookup.
+            local cache/play history only — set <code>STEAM_WEB_API_KEY</code> for full lookup.
           </>
         )}
       </p>
@@ -106,7 +118,7 @@ export default function BanListPanel({
             ) : bans.length === 0 ? (
               <tr>
                 <td colSpan={7} className="muted">
-                  No bans parsed. Click Refresh bans or check raw output if the server replied.
+                  No bans on this page. Use Refresh from server if the cache is empty.
                 </td>
               </tr>
             ) : (
@@ -206,11 +218,34 @@ export default function BanListPanel({
         </table>
       </div>
 
-      {bans.length > 0 && (
-        <p className="muted" style={{ marginTop: "0.5rem" }}>
-          {bans.length} ban{bans.length === 1 ? "" : "s"}
+      <div className="row between wrap" style={{ marginTop: "0.75rem" }}>
+        <p className="muted" style={{ margin: 0 }}>
+          {total === 0
+            ? "0 bans"
+            : `Showing ${from}–${to} of ${total} ban${total === 1 ? "" : "s"}`}
         </p>
-      )}
+        <div className="row wrap">
+          <button
+            type="button"
+            className="btn small"
+            disabled={loading || page <= 1}
+            onClick={() => onPageChange(page - 1)}
+          >
+            Previous
+          </button>
+          <span className="muted" style={{ fontSize: "0.85rem" }}>
+            Page {page} / {Math.max(1, totalPages)}
+          </span>
+          <button
+            type="button"
+            className="btn small"
+            disabled={loading || page >= totalPages}
+            onClick={() => onPageChange(page + 1)}
+          >
+            Next
+          </button>
+        </div>
+      </div>
 
       {showRaw && raw != null && (
         <pre className="console-out" style={{ marginTop: "0.75rem" }}>

@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import ServerBanEntry, ServerBanSnapshot
-from app.services.identity import resolve_names
+from app.services.identity import extract_steam_id, resolve_names
 
 
 def _utcnow() -> datetime:
@@ -58,9 +59,7 @@ def remove_cached_ban(db: Session, server_id: int, raw_or_net_id: str) -> int:
     rid = (raw_or_net_id or "").strip()
     if not rid:
         return 0
-    q = db.query(ServerBanEntry).filter(ServerBanEntry.server_id == server_id)
-    # Match full raw_id or net_id or display suffix
-    rows = q.all()
+    rows = db.query(ServerBanEntry).filter(ServerBanEntry.server_id == server_id).all()
     deleted = 0
     for row in rows:
         if rid in {row.raw_id, row.net_id, row.display_id} or rid in row.raw_id or rid in row.net_id:
@@ -69,24 +68,32 @@ def remove_cached_ban(db: Session, server_id: int, raw_or_net_id: str) -> int:
     return deleted
 
 
-def load_cached_bans(db: Session, server_id: int) -> dict[str, Any]:
-    """
-    Load cache + resolve names from identity_cache.
-    Returns dict suitable for BanListOut fields.
-    """
-    snap = db.get(ServerBanSnapshot, server_id)
-    rows = (
-        db.query(ServerBanEntry)
-        .filter(ServerBanEntry.server_id == server_id)
-        .order_by(ServerBanEntry.sort_index.asc(), ServerBanEntry.id.asc())
-        .all()
-    )
-    raw_ids = [r.raw_id for r in rows if r.raw_id]
-    names = resolve_names(db, raw_ids) if raw_ids else {}
+def _attach_names(db: Session, rows: list[ServerBanEntry]) -> list[dict[str, Any]]:
+    """Resolve display names for a set of ban rows (cache + API for misses)."""
+    lookup_keys: list[str] = []
+    for r in rows:
+        if r.raw_id:
+            lookup_keys.append(r.raw_id)
+        if r.display_id and r.display_id != r.raw_id:
+            lookup_keys.append(r.display_id)
+        if r.net_id and r.net_id not in (r.raw_id, r.display_id):
+            lookup_keys.append(r.net_id)
+        sid = extract_steam_id(r.raw_id or r.display_id or r.net_id or "")
+        if sid:
+            lookup_keys.append(sid)
+
+    names = resolve_names(db, lookup_keys) if lookup_keys else {}
 
     bans: list[dict[str, Any]] = []
     for r in rows:
-        info = names.get(r.raw_id) or {}
+        sid = extract_steam_id(r.raw_id or r.display_id or r.net_id or "")
+        info = (
+            names.get(r.raw_id)
+            or names.get(r.display_id)
+            or names.get(r.net_id)
+            or (names.get(sid) if sid else None)
+            or {}
+        )
         bans.append(
             {
                 "index": r.sort_index,
@@ -103,6 +110,44 @@ def load_cached_bans(db: Session, server_id: int) -> dict[str, Any]:
                 "name_source": str(info.get("source") or ""),
             }
         )
+    return bans
+
+
+def load_cached_bans(
+    db: Session,
+    server_id: int,
+    *,
+    page: int = 1,
+    page_size: int = 25,
+) -> dict[str, Any]:
+    """
+    Load cached bans with pagination + name resolution for the current page only.
+    """
+    page = max(1, int(page or 1))
+    page_size = min(100, max(1, int(page_size or 25)))
+
+    snap = db.get(ServerBanSnapshot, server_id)
+    total = (
+        db.query(func.count(ServerBanEntry.id))
+        .filter(ServerBanEntry.server_id == server_id)
+        .scalar()
+        or 0
+    )
+    total = int(total)
+    total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    if page > total_pages:
+        page = total_pages
+
+    offset = (page - 1) * page_size
+    rows = (
+        db.query(ServerBanEntry)
+        .filter(ServerBanEntry.server_id == server_id)
+        .order_by(ServerBanEntry.sort_index.asc(), ServerBanEntry.id.asc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+    bans = _attach_names(db, rows)
 
     return {
         "bans": bans,
@@ -112,4 +157,8 @@ def load_cached_bans(db: Session, server_id: int) -> dict[str, Any]:
         "fetched_at": snap.fetched_at if snap else None,
         "from_cache": True,
         "has_snapshot": snap is not None,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
     }

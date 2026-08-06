@@ -62,6 +62,10 @@ export default function DashboardPage() {
   const [steamLookupEnabled, setSteamLookupEnabled] = useState(false);
   const [bansFromCache, setBansFromCache] = useState(false);
   const [bansFetchedAt, setBansFetchedAt] = useState<string | null>(null);
+  const [bansPage, setBansPage] = useState(1);
+  const [bansPageSize] = useState(25);
+  const [bansTotal, setBansTotal] = useState(0);
+  const [bansTotalPages, setBansTotalPages] = useState(1);
   const [identityFlags, setIdentityFlags] = useState<Record<string, boolean>>({});
   const [dossierOpen, setDossierOpen] = useState(false);
   const [dossierNetId, setDossierNetId] = useState("");
@@ -265,13 +269,16 @@ export default function DashboardPage() {
       setBansFetchedAt(res.fetched_at || null);
       setBans(res.bans || []);
       setBansRaw(res.raw || "");
+      setBansPage(res.page || 1);
+      setBansTotal(res.total ?? 0);
+      setBansTotalPages(res.total_pages || 1);
       if (!res.ok) {
         setBansError(res.error || "Failed to load bans");
       } else {
         setBansError(
-          (res.bans || []).length === 0 && res.raw
+          (res.bans || []).length === 0 && (res.total ?? 0) === 0 && res.raw
             ? "Response received but no ban rows could be parsed — try Show raw."
-            : ""
+            : res.error || ""
         );
       }
       const ids = (res.bans || []).map((b) => b.raw_id).filter(Boolean);
@@ -282,12 +289,18 @@ export default function DashboardPage() {
 
   /** Load bans from DB cache (default) or live RCON when refresh=true. */
   const loadBans = useCallback(
-    async (refresh = false) => {
+    async (opts?: { refresh?: boolean; page?: number }) => {
       if (!serverId) return;
+      const page = opts?.page ?? bansPage;
+      const refresh = Boolean(opts?.refresh);
       setBansLoading(true);
       setBansError("");
       try {
-        const res = await api.bans(serverId, refresh);
+        const res = await api.bans(serverId, {
+          refresh,
+          page,
+          page_size: bansPageSize,
+        });
         applyBanList(res);
       } catch (e) {
         setBans([]);
@@ -296,19 +309,24 @@ export default function DashboardPage() {
         setBansLoading(false);
       }
     },
-    [serverId, applyBanList]
+    [serverId, bansPage, bansPageSize, applyBanList]
   );
 
-  // Load cached bans when switching server (no live RCON unless empty cache)
+  // Load cached bans when switching server
   useEffect(() => {
     if (!serverId || !features.kick_ban) {
       setBans([]);
       setBansRaw("");
       setBansFetchedAt(null);
+      setBansPage(1);
+      setBansTotal(0);
+      setBansTotalPages(1);
       return;
     }
-    loadBans(false);
-  }, [serverId, features.kick_ban, loadBans]);
+    setBansPage(1);
+    loadBans({ refresh: false, page: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when server changes
+  }, [serverId, features.kick_ban]);
 
   const runRcon = async (command: string, title = "RCON") => {
     if (!serverId) return;
@@ -317,11 +335,15 @@ export default function DashboardPage() {
     if (cmd.toLowerCase() === "listbans") {
       setBusy(true);
       try {
-        const res = await api.bans(serverId, true);
+        const res = await api.bans(serverId, {
+          refresh: true,
+          page: 1,
+          page_size: bansPageSize,
+        });
         applyBanList(res);
         setOutput(
           res.ok
-            ? `[List Bans] listbans\n\nCached ${(res.bans || []).length} ban(s). See table below.`
+            ? `[List Bans] listbans\n\nCached ${res.total ?? 0} ban(s). See table below.`
             : `[List Bans] listbans\n\n${res.error || "failed"}`
         );
       } catch (e) {
@@ -352,7 +374,7 @@ export default function DashboardPage() {
       const res = await api.unban(serverId, netId);
       showResult("Unban", res);
       if (res.ok) {
-        await loadBans();
+        await loadBans({ refresh: false, page: bansPage });
         refreshIdentityFlags([netId]);
       }
     } catch (e) {
@@ -779,8 +801,16 @@ export default function DashboardPage() {
           steamLookupEnabled={steamLookupEnabled}
           fromCache={bansFromCache}
           fetchedAt={bansFetchedAt}
+          page={bansPage}
+          pageSize={bansPageSize}
+          total={bansTotal}
+          totalPages={bansTotalPages}
           identityFlags={identityFlags}
-          onRefresh={() => loadBans(true)}
+          onRefresh={() => loadBans({ refresh: true, page: 1 })}
+          onPageChange={(p) => {
+            setBansPage(p);
+            loadBans({ refresh: false, page: p });
+          }}
           onUnban={unbanPlayer}
           onOpenIdentity={openDossier}
           raw={bansRaw}

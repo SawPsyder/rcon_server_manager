@@ -131,6 +131,10 @@ export type BanList = {
   steam_lookup_enabled?: boolean;
   from_cache?: boolean;
   fetched_at?: string | null;
+  page?: number;
+  page_size?: number;
+  total?: number;
+  total_pages?: number;
 };
 
 export type PlayerActionLog = {
@@ -331,10 +335,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ net_id }),
     }),
-  bans: (id: number, refresh = false) =>
-    request<BanList>(
-      `/api/servers/${id}/bans${refresh ? "?refresh=true" : ""}`
-    ),
+  bans: (id: number, opts?: { refresh?: boolean; page?: number; page_size?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.refresh) params.set("refresh", "true");
+    if (opts?.page != null) params.set("page", String(opts.page));
+    if (opts?.page_size != null) params.set("page_size", String(opts.page_size));
+    const q = params.toString();
+    return request<BanList>(`/api/servers/${id}/bans${q ? `?${q}` : ""}`);
+  },
 
   identityFlags: (identities: { platform?: string; external_id?: string; net_id?: string; steamid?: string }[]) =>
     request<{ flags: Record<string, boolean> }>("/api/identities/flags", {

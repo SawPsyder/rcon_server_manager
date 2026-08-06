@@ -225,51 +225,60 @@ def unban_player(
     return result
 
 
+def _ban_list_out(server_id: int, cached: dict, *, from_cache: bool, ok: bool | None = None, error: str | None = None) -> BanListOut:
+    return BanListOut(
+        server_id=server_id,
+        bans=[BanEntryOut(**b) for b in cached.get("bans") or []],
+        raw=cached.get("raw") or "",
+        ok=bool(cached.get("ok", True)) if ok is None else ok,
+        error=error if error is not None else cached.get("error"),
+        steam_lookup_enabled=steam_api_configured(),
+        from_cache=from_cache,
+        fetched_at=cached.get("fetched_at"),
+        page=int(cached.get("page") or 1),
+        page_size=int(cached.get("page_size") or 25),
+        total=int(cached.get("total") or 0),
+        total_pages=int(cached.get("total_pages") or 1),
+    )
+
+
 @router.get("/api/servers/{server_id}/bans", response_model=BanListOut)
 def list_bans(
     server_id: int,
     refresh: bool = False,
+    page: int = 1,
+    page_size: int = 25,
     db: Session = Depends(get_db),
     _admin: str = Depends(require_admin),
 ) -> BanListOut:
     """
-    Return structured bans for a server.
+    Return structured bans for a server (paginated).
 
     Default: serve DB cache (instant). Use ?refresh=true to run live listbans
-    and replace the cache.
+    and replace the cache. Names are resolved via identity_cache / Steam API
+    for the current page only.
     """
     server = get_server_or_404(db, server_id)
     _require_feature(server, "kick_ban")
+    page = max(1, page)
+    page_size = min(100, max(1, page_size))
 
     if not refresh:
-        cached = load_cached_bans(db, server_id)
+        cached = load_cached_bans(db, server_id, page=page, page_size=page_size)
         if cached.get("has_snapshot"):
-            return BanListOut(
-                server_id=server_id,
-                bans=[BanEntryOut(**b) for b in cached["bans"]],
-                raw=cached.get("raw") or "",
-                ok=bool(cached.get("ok", True)),
-                error=cached.get("error"),
-                steam_lookup_enabled=steam_api_configured(),
-                from_cache=True,
-                fetched_at=cached.get("fetched_at"),
-            )
+            return _ban_list_out(server_id, cached, from_cache=True)
         # No cache yet — fall through to live fetch once
 
     result = _exec(db, server_id, "listbans")
     if not result.ok:
-        # Preserve previous cache; only surface the error
-        cached = load_cached_bans(db, server_id)
+        cached = load_cached_bans(db, server_id, page=page, page_size=page_size)
         if cached.get("has_snapshot"):
-            return BanListOut(
-                server_id=server_id,
-                bans=[BanEntryOut(**b) for b in cached["bans"]],
-                raw=cached.get("raw") or "",
+            return _ban_list_out(
+                server_id,
+                cached,
+                from_cache=True,
                 ok=False,
                 error=result.error or "listbans failed",
-                steam_lookup_enabled=steam_api_configured(),
-                from_cache=True,
-                fetched_at=cached.get("fetched_at"),
             )
         return BanListOut(
             server_id=server_id,
@@ -280,6 +289,10 @@ def list_bans(
             steam_lookup_enabled=steam_api_configured(),
             from_cache=False,
             fetched_at=None,
+            page=page,
+            page_size=page_size,
+            total=0,
+            total_pages=1,
         )
 
     raw = result.response or ""
@@ -290,17 +303,8 @@ def list_bans(
     except Exception:
         db.rollback()
 
-    cached = load_cached_bans(db, server_id)
-    return BanListOut(
-        server_id=server_id,
-        bans=[BanEntryOut(**b) for b in cached["bans"]],
-        raw=cached.get("raw") or raw,
-        ok=True,
-        error=None,
-        steam_lookup_enabled=steam_api_configured(),
-        from_cache=False,
-        fetched_at=cached.get("fetched_at"),
-    )
+    cached = load_cached_bans(db, server_id, page=page, page_size=page_size)
+    return _ban_list_out(server_id, cached, from_cache=False, ok=True, error=None)
 
 
 @router.post("/api/servers/{server_id}/travel", response_model=RconCommandResponse)

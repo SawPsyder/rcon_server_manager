@@ -6,9 +6,7 @@ Lookup order for each id:
   3. Steam Web API (if STEAM_WEB_API_KEY set) → written to cache
 
 Epic EOS product user ids have no public reverse-lookup; we only store a name
-if something else provides it (future sources) via remember_identity().
-
-force_refresh=True only re-queries Steam for rows older than IDENTITY_CACHE_TTL.
+if something else provides it via remember_identity().
 """
 
 from __future__ import annotations
@@ -28,7 +26,11 @@ from app.models import IdentityCache, PlayerServerStats
 logger = logging.getLogger(__name__)
 
 STEAM_ID_RE = re.compile(r"^\d{17}$")
-STEAM_SUMMARIES_URL = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/"
+# Public Steam Web API (v0002 and v2 both work; v0002 is widely documented)
+STEAM_SUMMARIES_URLS = (
+    "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/",
+    "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/",
+)
 
 
 def _utcnow() -> datetime:
@@ -46,11 +48,13 @@ def _age_seconds(row: IdentityCache) -> float | None:
 
 def extract_steam_id(raw_id: str) -> str | None:
     rid = (raw_id or "").strip()
+    if not rid:
+        return None
     if rid.upper().startswith("STEAMNWI:"):
         rid = rid.split(":", 1)[1].strip()
     if STEAM_ID_RE.fullmatch(rid):
         return rid
-    m = re.search(r"(\d{17})", rid)
+    m = re.search(r"(?<!\d)(\d{17})(?!\d)", rid)
     return m.group(1) if m else None
 
 
@@ -72,15 +76,16 @@ def remember_identity(
     source: str = "manual",
     commit: bool = False,
 ) -> None:
-    """
-    Persist an id→name mapping. Prefer overwriting empty names; do not wipe a
-    better API name with a blank value.
-    """
+    """Persist an id→name mapping (never wipe a good name with blank)."""
     external_id = (external_id or "").strip()
     display_name = (display_name or "").strip()
     if not external_id or not display_name:
         return
     platform = (platform or "unknown").strip().lower()
+    # Normalize steam platform key
+    if platform in {"steamnwi", "steam_nwi"} or STEAM_ID_RE.fullmatch(external_id):
+        if platform != "eos":
+            platform = "steam"
     _upsert_cache(
         db,
         platform=platform,
@@ -107,9 +112,8 @@ def resolve_names(
     """
     Resolve raw ban/net ids using the local cache first.
 
-    Returns map raw_id -> {
-      display_name, profile_url, avatar_url, source, steam_id?, cached
-    }
+    Returns map keyed by **each input raw_id**, and also by steamid64 / eos id
+    when applicable (so callers can look up by any form).
     """
     settings = get_settings()
     ttl = max(60, int(settings.identity_cache_ttl_seconds))
@@ -117,9 +121,12 @@ def resolve_names(
     if not raw_ids:
         return out
 
+    # Deduplicate while preserving inputs
+    unique_raw = list(dict.fromkeys([(r or "").strip() for r in raw_ids if (r or "").strip()]))
+
     steam_by_raw: dict[str, str] = {}
     eos_by_raw: dict[str, str] = {}
-    for raw in raw_ids:
+    for raw in unique_raw:
         sid = extract_steam_id(raw)
         if sid:
             steam_by_raw[raw] = sid
@@ -131,11 +138,11 @@ def resolve_names(
     steam_ids = list(dict.fromkeys(steam_by_raw.values()))
     eos_ids = list(dict.fromkeys(eos_by_raw.values()))
 
-    # 1) Local DB cache (authoritative unless force_refresh + stale)
-    steam_resolved = _load_cached_names(db, "steam", steam_ids)
-    eos_resolved = _load_cached_names(db, "eos", eos_ids)
+    # 1) Local DB cache — match by external_id (any steam-like platform label)
+    steam_resolved = _load_cached_by_external_ids(db, steam_ids, prefer_platforms=("steam", "steamnwi"))
+    eos_resolved = _load_cached_by_external_ids(db, eos_ids, prefer_platforms=("eos",))
 
-    # 2) Presence / play history → fill cache for missing steam names
+    # 2) Presence / play history
     missing_steam = [s for s in steam_ids if not (steam_resolved.get(s) or {}).get("display_name")]
     if missing_steam:
         for row in (
@@ -163,7 +170,7 @@ def resolve_names(
                 source="presence",
             )
 
-    # 3) Steam API only for ids still missing a name (or force refresh of stale)
+    # 3) Steam Web API for still-missing (or force refresh of stale)
     fetch_ids: list[str] = []
     if force_refresh:
         for sid in steam_ids:
@@ -171,13 +178,10 @@ def resolve_names(
             if not info or not info.get("display_name"):
                 fetch_ids.append(sid)
                 continue
-            # Only re-fetch if cached entry is older than TTL
             row = (
                 db.query(IdentityCache)
-                .filter(
-                    IdentityCache.platform == "steam",
-                    IdentityCache.external_id == sid,
-                )
+                .filter(IdentityCache.external_id == sid)
+                .order_by(IdentityCache.updated_at.desc())
                 .first()
             )
             age = _age_seconds(row) if row else None
@@ -185,28 +189,34 @@ def resolve_names(
                 fetch_ids.append(sid)
     else:
         fetch_ids = [
-            sid
-            for sid in steam_ids
-            if not (steam_resolved.get(sid) or {}).get("display_name")
+            sid for sid in steam_ids if not (steam_resolved.get(sid) or {}).get("display_name")
         ]
 
     if fetch_ids:
+        logger.info(
+            "Steam name lookup: %s id(s) missing from cache, API configured=%s",
+            len(fetch_ids),
+            steam_api_configured(),
+        )
         api_hits = _fetch_steam_api(db, fetch_ids)
         steam_resolved.update(api_hits)
+        logger.info("Steam name lookup: resolved %s/%s via API", len(api_hits), len(fetch_ids))
 
-    for raw in raw_ids:
+    def _pack_steam(sid: str, info: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "display_name": info.get("display_name") or "",
+            "profile_url": info.get("profile_url")
+            or f"https://steamcommunity.com/profiles/{sid}",
+            "avatar_url": info.get("avatar_url") or "",
+            "source": info.get("source") or "",
+            "steam_id": sid,
+            "cached": bool(info.get("cached")),
+        }
+
+    for raw in unique_raw:
         if raw in steam_by_raw:
             sid = steam_by_raw[raw]
-            info = steam_resolved.get(sid) or {}
-            out[raw] = {
-                "display_name": info.get("display_name") or "",
-                "profile_url": info.get("profile_url")
-                or f"https://steamcommunity.com/profiles/{sid}",
-                "avatar_url": info.get("avatar_url") or "",
-                "source": info.get("source") or "",
-                "steam_id": sid,
-                "cached": bool(info.get("cached")),
-            }
+            out[raw] = _pack_steam(sid, steam_resolved.get(sid) or {})
         elif raw in eos_by_raw:
             eid = eos_by_raw[raw]
             info = eos_resolved.get(eid) or {}
@@ -228,6 +238,24 @@ def resolve_names(
                 "cached": False,
             }
 
+    # Secondary keys: allow lookup by pure steamid / eos id
+    for sid, info in steam_resolved.items():
+        if sid not in out:
+            out[sid] = _pack_steam(sid, info)
+    for eid, info in eos_resolved.items():
+        key = f"EOS:{eid}"
+        if key not in out:
+            out[key] = {
+                "display_name": info.get("display_name") or "",
+                "profile_url": info.get("profile_url") or "",
+                "avatar_url": info.get("avatar_url") or "",
+                "source": info.get("source") or "",
+                "steam_id": None,
+                "cached": bool(info.get("cached")),
+            }
+        if eid not in out:
+            out[eid] = out[key]
+
     try:
         db.commit()
     except Exception:
@@ -237,29 +265,41 @@ def resolve_names(
     return out
 
 
-def _load_cached_names(
+def _load_cached_by_external_ids(
     db: Session,
-    platform: str,
     external_ids: list[str],
+    *,
+    prefer_platforms: tuple[str, ...] = (),
 ) -> dict[str, dict[str, Any]]:
-    """Return all cached rows that have a display_name (never expires for reads)."""
+    """Load cache rows by external_id (platform-flexible)."""
     if not external_ids:
         return {}
     rows = (
         db.query(IdentityCache)
-        .filter(
-            IdentityCache.platform == platform,
-            IdentityCache.external_id.in_(external_ids),
-        )
+        .filter(IdentityCache.external_id.in_(external_ids))
         .all()
     )
-    out: dict[str, dict[str, Any]] = {}
+    # Prefer certain platforms if multiple rows exist for same id
+    by_id: dict[str, IdentityCache] = {}
     for row in rows:
         name = (row.display_name or "").strip()
         if not name:
             continue
-        out[row.external_id] = {
-            "display_name": name,
+        existing = by_id.get(row.external_id)
+        if existing is None:
+            by_id[row.external_id] = row
+            continue
+        # Prefer preferred platforms / steam_api source
+        pref = {p.lower() for p in prefer_platforms}
+        if row.platform.lower() in pref and existing.platform.lower() not in pref:
+            by_id[row.external_id] = row
+        elif row.source == "steam_api" and existing.source != "steam_api":
+            by_id[row.external_id] = row
+
+    out: dict[str, dict[str, Any]] = {}
+    for eid, row in by_id.items():
+        out[eid] = {
+            "display_name": (row.display_name or "").strip(),
             "profile_url": row.profile_url or "",
             "avatar_url": row.avatar_url or "",
             "source": row.source or "cache",
@@ -268,10 +308,19 @@ def _load_cached_names(
     return out
 
 
+def _normalize_api_key(raw: str) -> str:
+    key = (raw or "").strip().strip('"').strip("'")
+    # Some people paste "Key: XXXXX"
+    if key.lower().startswith("key:"):
+        key = key.split(":", 1)[1].strip()
+    return key
+
+
 def _fetch_steam_api(db: Session, steam_ids: list[str]) -> dict[str, dict[str, Any]]:
-    api_key = (get_settings().steam_web_api_key or "").strip()
+    settings = get_settings()
+    api_key = _normalize_api_key(settings.resolved_steam_api_key())
     if not api_key:
-        logger.debug("STEAM_WEB_API_KEY not set; skipping remote Steam lookup")
+        logger.info("STEAM_WEB_API_KEY not set; Steam names only from local cache/presence")
         return {}
 
     result: dict[str, dict[str, Any]] = {}
@@ -283,7 +332,7 @@ def _fetch_steam_api(db: Session, steam_ids: list[str]) -> dict[str, dict[str, A
             logger.warning("Steam Web API lookup failed: %s", exc)
             break
         for p in players:
-            sid = str(p.get("steamid") or "")
+            sid = str(p.get("steamid") or "").strip()
             if not sid:
                 continue
             name = str(p.get("personaname") or "").strip()
@@ -300,7 +349,6 @@ def _fetch_steam_api(db: Session, steam_ids: list[str]) -> dict[str, dict[str, A
                 "source": "steam_api",
                 "cached": False,
             }
-            # Always persist so next request is free
             remember_identity(
                 db,
                 platform="steam",
@@ -320,14 +368,34 @@ def _steam_get_player_summaries(api_key: str, steam_ids: list[str]) -> list[dict
         "key": api_key,
         "steamids": ",".join(steam_ids),
     }
-    with httpx.Client(timeout=8.0) as client:
-        resp = client.get(STEAM_SUMMARIES_URL, params=params)
-        resp.raise_for_status()
-        data = resp.json()
-    players = (
-        data.get("response", {}).get("players") if isinstance(data, dict) else None
-    )
-    return list(players or [])
+    last_err: Exception | None = None
+    with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+        for url in STEAM_SUMMARIES_URLS:
+            try:
+                resp = client.get(url, params=params)
+                if resp.status_code == 403:
+                    logger.warning(
+                        "Steam Web API returned 403 (invalid/forbidden key?) for %s", url
+                    )
+                    last_err = httpx.HTTPStatusError(
+                        "403", request=resp.request, response=resp
+                    )
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                players = (
+                    data.get("response", {}).get("players")
+                    if isinstance(data, dict)
+                    else None
+                )
+                return list(players or [])
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                logger.debug("Steam API attempt failed (%s): %s", url, exc)
+                continue
+    if last_err:
+        raise last_err
+    return []
 
 
 def _upsert_cache(
@@ -362,7 +430,6 @@ def _upsert_cache(
         )
         return
 
-    # Prefer non-empty updates; keep richer avatar/profile when new ones are blank
     if display_name:
         row.display_name = display_name
     if profile_url:
@@ -370,11 +437,11 @@ def _upsert_cache(
     if avatar_url:
         row.avatar_url = avatar_url
     if source:
-        # Prefer steam_api over presence once we have API data
         if source == "steam_api" or row.source != "steam_api":
             row.source = source
     row.updated_at = _utcnow()
 
 
 def steam_api_configured() -> bool:
-    return bool((get_settings().steam_web_api_key or "").strip())
+    s = get_settings()
+    return bool(_normalize_api_key(s.steam_web_api_key or s.steam_api_key))

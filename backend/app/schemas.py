@@ -235,6 +235,10 @@ class BanListOut(BaseModel):
     # True when payload came from DB cache (not a live listbans)
     from_cache: bool = False
     fetched_at: datetime | None = None
+    page: int = 1
+    page_size: int = 25
+    total: int = 0
+    total_pages: int = 1
 
 
 class AdminSayRequest(BaseModel):
