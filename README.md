@@ -103,6 +103,7 @@ Services:
 | `DATA_DIR` | App data dir for encryption key file (default `/data`; **not** the SQL store in Compose) |
 | `SESSION_HTTPS_ONLY` | Set `true` behind HTTPS reverse proxy |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | SQLAlchemy pool tuning |
+| `STEAM_WEB_API_KEY` | Optional; resolve SteamID64 → persona name on ban list ([get a key](https://steamcommunity.com/dev/apikey)) |
 
 Generate a Fernet key:
 

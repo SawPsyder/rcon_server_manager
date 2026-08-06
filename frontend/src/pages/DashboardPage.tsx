@@ -54,6 +54,7 @@ export default function DashboardPage() {
   const [bansError, setBansError] = useState("");
   const [bansLoading, setBansLoading] = useState(false);
   const [showBansRaw, setShowBansRaw] = useState(false);
+  const [steamLookupEnabled, setSteamLookupEnabled] = useState(false);
 
   const [mapId, setMapId] = useState<number | "">("");
   const [gamemode, setGamemode] = useState("");
@@ -227,6 +228,7 @@ export default function DashboardPage() {
     setBansError("");
     try {
       const res = await api.bans(serverId);
+      setSteamLookupEnabled(Boolean(res.steam_lookup_enabled));
       if (!res.ok) {
         setBans([]);
         setBansRaw(res.raw || "");
@@ -256,6 +258,7 @@ export default function DashboardPage() {
       setBusy(true);
       try {
         const res = await api.bans(serverId);
+        setSteamLookupEnabled(Boolean(res.steam_lookup_enabled));
         if (!res.ok) {
           setBans([]);
           setBansRaw(res.raw || "");
@@ -548,6 +551,7 @@ export default function DashboardPage() {
           loading={bansLoading}
           error={bansError}
           busy={busy}
+          steamLookupEnabled={steamLookupEnabled}
           onRefresh={loadBans}
           onUnban={unbanPlayer}
           raw={bansRaw}

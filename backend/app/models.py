@@ -180,3 +180,25 @@ class Setting(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     key: Mapped[str] = mapped_column(String(64), nullable=False)
     value: Mapped[str] = mapped_column(Text, default="")
+
+
+class IdentityCache(Base):
+    """Resolved platform usernames (Steam persona, etc.)."""
+
+    __tablename__ = "identity_cache"
+    __table_args__ = (
+        UniqueConstraint("platform", "external_id", name="uq_identity_platform_id"),
+        Index("ix_identity_external", "external_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # steam | steamnwi | eos | unknown
+    platform: Mapped[str] = mapped_column(String(32), nullable=False, default="steam")
+    # Canonical id (SteamID64 digits, or EOS product user id blob)
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    profile_url: Mapped[str] = mapped_column(String(512), default="")
+    avatar_url: Mapped[str] = mapped_column(String(512), default="")
+    # steam_api | presence | manual
+    source: Mapped[str] = mapped_column(String(32), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

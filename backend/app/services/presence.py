@@ -94,6 +94,21 @@ def update_presence(
             db.add(stats)
             by_steam[steam] = stats
             online_stats[steam] = stats
+            try:
+                from app.services.identity import _upsert_cache
+
+                if name and name != steam:
+                    _upsert_cache(
+                        db,
+                        platform="steam",
+                        external_id=steam,
+                        display_name=name,
+                        profile_url=f"https://steamcommunity.com/profiles/{steam}",
+                        avatar_url="",
+                        source="presence",
+                    )
+            except Exception:
+                pass
             continue
 
         last_seen = _aware(stats.last_seen_at) or now
@@ -116,6 +131,22 @@ def update_presence(
             stats.last_ip = ip
         stats.last_score = score
         online_stats[steam] = stats
+        # Feed identity cache so ban list can show names without Steam API
+        try:
+            from app.services.identity import _upsert_cache
+
+            if name and name != steam:
+                _upsert_cache(
+                    db,
+                    platform="steam",
+                    external_id=steam,
+                    display_name=name,
+                    profile_url=f"https://steamcommunity.com/profiles/{steam}",
+                    avatar_url="",
+                    source="presence",
+                )
+        except Exception:
+            pass
 
     # Close sessions for players no longer present
     for steam, stats in by_steam.items():

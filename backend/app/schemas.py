@@ -161,6 +161,11 @@ class BanEntryOut(BaseModel):
     duration: str
     reason: str
     permanent: bool = False
+    # Resolved persona (Steam Web API / local presence cache)
+    display_name: str = ""
+    profile_url: str = ""
+    avatar_url: str = ""
+    name_source: str = ""
 
 
 class BanListOut(BaseModel):
@@ -169,6 +174,7 @@ class BanListOut(BaseModel):
     raw: str = ""
     ok: bool = True
     error: str | None = None
+    steam_lookup_enabled: bool = False
 
 
 class AdminSayRequest(BaseModel):

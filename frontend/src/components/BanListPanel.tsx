@@ -5,6 +5,7 @@ type Props = {
   loading: boolean;
   error: string;
   busy: boolean;
+  steamLookupEnabled?: boolean;
   onRefresh: () => void;
   onUnban: (netId: string) => void;
   raw?: string;
@@ -17,6 +18,7 @@ export default function BanListPanel({
   loading,
   error,
   busy,
+  steamLookupEnabled,
   onRefresh,
   onUnban,
   raw,
@@ -39,8 +41,16 @@ export default function BanListPanel({
         </div>
       </div>
       <p className="muted" style={{ marginTop: "0.35rem" }}>
-        Parsed from RCON <code>listbans</code>. Unban sends{" "}
-        <code>unban &quot;…&quot;</code> with the full network id.
+        Parsed from RCON <code>listbans</code>. Steam names use{" "}
+        {steamLookupEnabled ? (
+          <>the configured Steam Web API key (cached).</>
+        ) : (
+          <>
+            local play history when available — set <code>STEAM_WEB_API_KEY</code> for full Steam
+            persona lookup.
+          </>
+        )}{" "}
+        Epic (EOS) product ids cannot be resolved publicly.
       </p>
 
       {error && <div className="alert error">{error}</div>}
@@ -51,6 +61,7 @@ export default function BanListPanel({
             <tr>
               <th title="Ban list order">#</th>
               <th title="Platform / id system">Platform</th>
+              <th title="Resolved persona / display name">Name</th>
               <th title="Identifier used for unban">Net ID</th>
               <th title="Permanent or temporary duration">Duration</th>
               <th title="Ban reason text from the server">Reason</th>
@@ -60,13 +71,13 @@ export default function BanListPanel({
           <tbody>
             {loading && bans.length === 0 ? (
               <tr>
-                <td colSpan={6} className="muted">
+                <td colSpan={7} className="muted">
                   Loading ban list…
                 </td>
               </tr>
             ) : bans.length === 0 ? (
               <tr>
-                <td colSpan={6} className="muted">
+                <td colSpan={7} className="muted">
                   No bans parsed. Click Refresh bans or check raw output if the server replied.
                 </td>
               </tr>
@@ -75,9 +86,48 @@ export default function BanListPanel({
                 <tr key={b.raw_id}>
                   <td>{b.index}</td>
                   <td>
-                    <span className={`platform-pill ${b.platform.toLowerCase().includes("epic") ? "eos" : "steam"}`}>
+                    <span
+                      className={`platform-pill ${
+                        b.platform.toLowerCase().includes("epic") ? "eos" : "steam"
+                      }`}
+                    >
                       {b.platform}
                     </span>
+                  </td>
+                  <td>
+                    <div className="row" style={{ gap: "0.5rem" }}>
+                      {b.avatar_url ? (
+                        <img
+                          src={b.avatar_url}
+                          alt=""
+                          width={28}
+                          height={28}
+                          className="avatar"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : null}
+                      <div>
+                        {b.display_name && b.profile_url ? (
+                          <a
+                            href={b.profile_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="name-link"
+                          >
+                            {b.display_name}
+                          </a>
+                        ) : b.display_name ? (
+                          <strong>{b.display_name}</strong>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                        {b.name_source ? (
+                          <div className="muted" style={{ fontSize: "0.7rem" }}>
+                            via {b.name_source}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
                   </td>
                   <td>
                     <code className="steam-id" title={b.raw_id}>
@@ -101,7 +151,7 @@ export default function BanListPanel({
                       onClick={() => {
                         if (
                           !confirm(
-                            `Unban ${b.platform} id?\n${b.raw_id}\n\nReason was: ${b.reason}`
+                            `Unban ${b.display_name || b.platform}?\n${b.raw_id}\n\nReason was: ${b.reason}`
                           )
                         ) {
                           return;

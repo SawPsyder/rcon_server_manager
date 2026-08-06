@@ -116,6 +116,10 @@ export type BanEntry = {
   duration: string;
   reason: string;
   permanent: boolean;
+  display_name?: string;
+  profile_url?: string;
+  avatar_url?: string;
+  name_source?: string;
 };
 
 export type BanList = {
@@ -124,6 +128,7 @@ export type BanList = {
   raw: string;
   ok: boolean;
   error?: string | null;
+  steam_lookup_enabled?: boolean;
 };
 
 export type TypeSettings = {

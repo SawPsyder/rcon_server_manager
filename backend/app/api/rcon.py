@@ -20,6 +20,7 @@ from app.schemas import (
 )
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
 from app.server_types.sandstorm import build_travel_command, map_gamemodes, parse_listbans
+from app.services.identity import resolve_names, steam_api_configured
 from app.services.rcon import RconError, run_rcon
 
 router = APIRouter(tags=["rcon"])
@@ -166,12 +167,34 @@ def list_bans(
         )
     raw = result.response or ""
     parsed = parse_listbans(raw)
+    names = resolve_names(db, [str(r.get("raw_id") or "") for r in parsed])
+    bans_out: list[BanEntryOut] = []
+    for row in parsed:
+        rid = str(row.get("raw_id") or "")
+        info = names.get(rid) or {}
+        bans_out.append(
+            BanEntryOut(
+                index=int(row.get("index") or 0),
+                platform=str(row.get("platform") or ""),
+                raw_id=rid,
+                net_id=str(row.get("net_id") or rid),
+                display_id=str(row.get("display_id") or rid),
+                duration=str(row.get("duration") or "—"),
+                reason=str(row.get("reason") or "—"),
+                permanent=bool(row.get("permanent")),
+                display_name=str(info.get("display_name") or ""),
+                profile_url=str(info.get("profile_url") or ""),
+                avatar_url=str(info.get("avatar_url") or ""),
+                name_source=str(info.get("source") or ""),
+            )
+        )
     return BanListOut(
         server_id=server_id,
-        bans=[BanEntryOut(**row) for row in parsed],
+        bans=bans_out,
         raw=raw,
         ok=True,
         error=None,
+        steam_lookup_enabled=steam_api_configured(),
     )
 
 
