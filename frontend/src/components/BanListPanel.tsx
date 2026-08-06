@@ -41,13 +41,13 @@ export default function BanListPanel({
         </div>
       </div>
       <p className="muted" style={{ marginTop: "0.35rem" }}>
-        Parsed from RCON <code>listbans</code>. Steam names use{" "}
+        Parsed from RCON <code>listbans</code>. Resolved names are stored in the local{" "}
+        <code>identity_cache</code> table and reused (no repeated lookups). Steam:{" "}
         {steamLookupEnabled ? (
-          <>the configured Steam Web API key (cached).</>
+          <>Web API on first sight, then cache.</>
         ) : (
           <>
-            local play history when available — set <code>STEAM_WEB_API_KEY</code> for full Steam
-            persona lookup.
+            play history when known — set <code>STEAM_WEB_API_KEY</code> for full persona lookup.
           </>
         )}{" "}
         Epic (EOS) product ids cannot be resolved publicly.

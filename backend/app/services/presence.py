@@ -95,16 +95,15 @@ def update_presence(
             by_steam[steam] = stats
             online_stats[steam] = stats
             try:
-                from app.services.identity import _upsert_cache
+                from app.services.identity import remember_identity
 
                 if name and name != steam:
-                    _upsert_cache(
+                    remember_identity(
                         db,
                         platform="steam",
                         external_id=steam,
                         display_name=name,
                         profile_url=f"https://steamcommunity.com/profiles/{steam}",
-                        avatar_url="",
                         source="presence",
                     )
             except Exception:
@@ -131,18 +130,17 @@ def update_presence(
             stats.last_ip = ip
         stats.last_score = score
         online_stats[steam] = stats
-        # Feed identity cache so ban list can show names without Steam API
+        # Feed identity_cache so ban list / lookups never re-resolve this id
         try:
-            from app.services.identity import _upsert_cache
+            from app.services.identity import remember_identity
 
             if name and name != steam:
-                _upsert_cache(
+                remember_identity(
                     db,
                     platform="steam",
                     external_id=steam,
                     display_name=name,
                     profile_url=f"https://steamcommunity.com/profiles/{steam}",
-                    avatar_url="",
                     source="presence",
                 )
         except Exception:

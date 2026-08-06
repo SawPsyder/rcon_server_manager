@@ -103,7 +103,8 @@ Services:
 | `DATA_DIR` | App data dir for encryption key file (default `/data`; **not** the SQL store in Compose) |
 | `SESSION_HTTPS_ONLY` | Set `true` behind HTTPS reverse proxy |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | SQLAlchemy pool tuning |
-| `STEAM_WEB_API_KEY` | Optional; resolve SteamID64 → persona name on ban list ([get a key](https://steamcommunity.com/dev/apikey)) |
+| `STEAM_WEB_API_KEY` | Optional; resolve SteamID64 → persona name on ban list ([get a key](https://steamcommunity.com/dev/apikey)). Results are stored in DB `identity_cache` and reused. |
+| `IDENTITY_CACHE_TTL_SECONDS` | Only used when force-refreshing stale Steam API entries (default 7 days). Cache hits with a name never require a new API call. |
 
 Generate a Fernet key:
 

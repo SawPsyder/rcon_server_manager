@@ -1,8 +1,14 @@
-"""Resolve platform net IDs to display names.
+"""Resolve platform net IDs to display names with a durable local DB cache.
 
-Steam: official Web API GetPlayerSummaries (needs STEAM_WEB_API_KEY).
-Epic EOS product user ids: no public free lookup — we only show names if we
-already saw them in-game (presence) or from a prior cache fill.
+Lookup order for each id:
+  1. identity_cache table (always preferred — no network if name present)
+  2. PlayerServerStats.last_name (in-game names we've seen) → written to cache
+  3. Steam Web API (if STEAM_WEB_API_KEY set) → written to cache
+
+Epic EOS product user ids have no public reverse-lookup; we only store a name
+if something else provides it (future sources) via remember_identity().
+
+force_refresh=True only re-queries Steam for rows older than IDENTITY_CACHE_TTL.
 """
 
 from __future__ import annotations
@@ -29,14 +35,13 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _is_fresh(row: IdentityCache, ttl: int) -> bool:
+def _age_seconds(row: IdentityCache) -> float | None:
     if not row.updated_at:
-        return False
+        return None
     ts = row.updated_at
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
-    age = (_utcnow() - ts).total_seconds()
-    return age < ttl and bool(row.display_name)
+    return max(0.0, (_utcnow() - ts).total_seconds())
 
 
 def extract_steam_id(raw_id: str) -> str | None:
@@ -56,6 +61,43 @@ def extract_eos_id(raw_id: str) -> str | None:
     return None
 
 
+def remember_identity(
+    db: Session,
+    *,
+    platform: str,
+    external_id: str,
+    display_name: str,
+    profile_url: str = "",
+    avatar_url: str = "",
+    source: str = "manual",
+    commit: bool = False,
+) -> None:
+    """
+    Persist an id→name mapping. Prefer overwriting empty names; do not wipe a
+    better API name with a blank value.
+    """
+    external_id = (external_id or "").strip()
+    display_name = (display_name or "").strip()
+    if not external_id or not display_name:
+        return
+    platform = (platform or "unknown").strip().lower()
+    _upsert_cache(
+        db,
+        platform=platform,
+        external_id=external_id,
+        display_name=display_name,
+        profile_url=profile_url,
+        avatar_url=avatar_url,
+        source=source,
+    )
+    if commit:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to commit identity cache")
+
+
 def resolve_names(
     db: Session,
     raw_ids: list[str],
@@ -63,10 +105,10 @@ def resolve_names(
     force_refresh: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """
-    Resolve a list of raw ban/net ids to display info.
+    Resolve raw ban/net ids using the local cache first.
 
     Returns map raw_id -> {
-      display_name, profile_url, avatar_url, source, steam_id?
+      display_name, profile_url, avatar_url, source, steam_id?, cached
     }
     """
     settings = get_settings()
@@ -75,18 +117,26 @@ def resolve_names(
     if not raw_ids:
         return out
 
-    # Group steam ids needing API / cache
     steam_by_raw: dict[str, str] = {}
+    eos_by_raw: dict[str, str] = {}
     for raw in raw_ids:
         sid = extract_steam_id(raw)
         if sid:
             steam_by_raw[raw] = sid
+            continue
+        eid = extract_eos_id(raw)
+        if eid:
+            eos_by_raw[raw] = eid
 
     steam_ids = list(dict.fromkeys(steam_by_raw.values()))
-    steam_resolved = _resolve_steam_ids(db, steam_ids, ttl=ttl, force_refresh=force_refresh)
+    eos_ids = list(dict.fromkeys(eos_by_raw.values()))
 
-    # Presence fallback for steam ids not in API/cache
-    missing_steam = [s for s in steam_ids if s not in steam_resolved or not steam_resolved[s].get("display_name")]
+    # 1) Local DB cache (authoritative unless force_refresh + stale)
+    steam_resolved = _load_cached_names(db, "steam", steam_ids)
+    eos_resolved = _load_cached_names(db, "eos", eos_ids)
+
+    # 2) Presence / play history → fill cache for missing steam names
+    missing_steam = [s for s in steam_ids if not (steam_resolved.get(s) or {}).get("display_name")]
     if missing_steam:
         for row in (
             db.query(PlayerServerStats)
@@ -94,34 +144,55 @@ def resolve_names(
             .all()
         ):
             name = (row.last_name or "").strip()
-            if not name:
+            if not name or name == row.steam_id:
                 continue
-            info = {
+            profile = f"https://steamcommunity.com/profiles/{row.steam_id}"
+            steam_resolved[row.steam_id] = {
                 "display_name": name,
-                "profile_url": f"https://steamcommunity.com/profiles/{row.steam_id}",
+                "profile_url": profile,
                 "avatar_url": "",
                 "source": "presence",
-                "steam_id": row.steam_id,
+                "cached": False,
             }
-            steam_resolved[row.steam_id] = info
-            _upsert_cache(
+            remember_identity(
                 db,
                 platform="steam",
                 external_id=row.steam_id,
                 display_name=name,
-                profile_url=info["profile_url"],
-                avatar_url="",
+                profile_url=profile,
                 source="presence",
             )
 
-    # EOS: only presence/cache (no public API)
-    eos_by_raw: dict[str, str] = {}
-    for raw in raw_ids:
-        eid = extract_eos_id(raw)
-        if eid:
-            eos_by_raw[raw] = eid
-    eos_ids = list(dict.fromkeys(eos_by_raw.values()))
-    eos_resolved = _load_cached(db, "eos", eos_ids, ttl=ttl, force_refresh=force_refresh)
+    # 3) Steam API only for ids still missing a name (or force refresh of stale)
+    fetch_ids: list[str] = []
+    if force_refresh:
+        for sid in steam_ids:
+            info = steam_resolved.get(sid)
+            if not info or not info.get("display_name"):
+                fetch_ids.append(sid)
+                continue
+            # Only re-fetch if cached entry is older than TTL
+            row = (
+                db.query(IdentityCache)
+                .filter(
+                    IdentityCache.platform == "steam",
+                    IdentityCache.external_id == sid,
+                )
+                .first()
+            )
+            age = _age_seconds(row) if row else None
+            if age is None or age >= ttl:
+                fetch_ids.append(sid)
+    else:
+        fetch_ids = [
+            sid
+            for sid in steam_ids
+            if not (steam_resolved.get(sid) or {}).get("display_name")
+        ]
+
+    if fetch_ids:
+        api_hits = _fetch_steam_api(db, fetch_ids)
+        steam_resolved.update(api_hits)
 
     for raw in raw_ids:
         if raw in steam_by_raw:
@@ -134,6 +205,7 @@ def resolve_names(
                 "avatar_url": info.get("avatar_url") or "",
                 "source": info.get("source") or "",
                 "steam_id": sid,
+                "cached": bool(info.get("cached")),
             }
         elif raw in eos_by_raw:
             eid = eos_by_raw[raw]
@@ -144,6 +216,7 @@ def resolve_names(
                 "avatar_url": info.get("avatar_url") or "",
                 "source": info.get("source") or "",
                 "steam_id": None,
+                "cached": bool(info.get("cached")),
             }
         else:
             out[raw] = {
@@ -152,6 +225,7 @@ def resolve_names(
                 "avatar_url": "",
                 "source": "",
                 "steam_id": None,
+                "cached": False,
             }
 
     try:
@@ -163,14 +237,12 @@ def resolve_names(
     return out
 
 
-def _load_cached(
+def _load_cached_names(
     db: Session,
     platform: str,
     external_ids: list[str],
-    *,
-    ttl: int,
-    force_refresh: bool,
 ) -> dict[str, dict[str, Any]]:
+    """Return all cached rows that have a display_name (never expires for reads)."""
     if not external_ids:
         return {}
     rows = (
@@ -183,66 +255,28 @@ def _load_cached(
     )
     out: dict[str, dict[str, Any]] = {}
     for row in rows:
-        if force_refresh and not _is_fresh(row, ttl):
+        name = (row.display_name or "").strip()
+        if not name:
             continue
-        if not force_refresh and not row.display_name:
-            continue
-        if not force_refresh and not _is_fresh(row, ttl) and row.source == "steam_api":
-            # stale API entry still usable as soft cache if no refresh wanted
-            pass
         out[row.external_id] = {
-            "display_name": row.display_name or "",
+            "display_name": name,
             "profile_url": row.profile_url or "",
             "avatar_url": row.avatar_url or "",
             "source": row.source or "cache",
+            "cached": True,
         }
     return out
 
 
-def _resolve_steam_ids(
-    db: Session,
-    steam_ids: list[str],
-    *,
-    ttl: int,
-    force_refresh: bool,
-) -> dict[str, dict[str, Any]]:
-    if not steam_ids:
-        return {}
-
-    cached = _load_cached(db, "steam", steam_ids, ttl=ttl, force_refresh=False)
-    result: dict[str, dict[str, Any]] = dict(cached)
-
-    need_api: list[str] = []
-    for sid in steam_ids:
-        row_info = result.get(sid)
-        if force_refresh or not row_info or not row_info.get("display_name"):
-            # Check DB freshness for API refresh
-            need_api.append(sid)
-        else:
-            # have name from cache
-            continue
-
-    # Only call API for ids missing a name (or force)
-    if force_refresh:
-        fetch_ids = steam_ids
-    else:
-        fetch_ids = [
-            sid
-            for sid in need_api
-            if not result.get(sid, {}).get("display_name")
-        ]
-
-    if not fetch_ids:
-        return result
-
+def _fetch_steam_api(db: Session, steam_ids: list[str]) -> dict[str, dict[str, Any]]:
     api_key = (get_settings().steam_web_api_key or "").strip()
     if not api_key:
-        logger.debug("STEAM_WEB_API_KEY not set; Steam names only from local presence cache")
-        return result
+        logger.debug("STEAM_WEB_API_KEY not set; skipping remote Steam lookup")
+        return {}
 
-    # Steam allows up to 100 ids per request
-    for i in range(0, len(fetch_ids), 100):
-        batch = fetch_ids[i : i + 100]
+    result: dict[str, dict[str, Any]] = {}
+    for i in range(0, len(steam_ids), 100):
+        batch = steam_ids[i : i + 100]
         try:
             players = _steam_get_player_summaries(api_key, batch)
         except Exception as exc:  # noqa: BLE001
@@ -254,29 +288,30 @@ def _resolve_steam_ids(
                 continue
             name = str(p.get("personaname") or "").strip()
             profile = str(p.get("profileurl") or f"https://steamcommunity.com/profiles/{sid}")
-            avatar = str(p.get("avatarfull") or p.get("avatarmedium") or p.get("avatar") or "")
-            info = {
+            avatar = str(
+                p.get("avatarfull") or p.get("avatarmedium") or p.get("avatar") or ""
+            )
+            if not name:
+                continue
+            result[sid] = {
                 "display_name": name,
                 "profile_url": profile,
                 "avatar_url": avatar,
                 "source": "steam_api",
-                "steam_id": sid,
+                "cached": False,
             }
-            result[sid] = info
-            if name:
-                _upsert_cache(
-                    db,
-                    platform="steam",
-                    external_id=sid,
-                    display_name=name,
-                    profile_url=profile,
-                    avatar_url=avatar,
-                    source="steam_api",
-                )
-        # be polite to the API
-        if i + 100 < len(fetch_ids):
+            # Always persist so next request is free
+            remember_identity(
+                db,
+                platform="steam",
+                external_id=sid,
+                display_name=name,
+                profile_url=profile,
+                avatar_url=avatar,
+                source="steam_api",
+            )
+        if i + 100 < len(steam_ids):
             time.sleep(0.05)
-
     return result
 
 
@@ -290,9 +325,7 @@ def _steam_get_player_summaries(api_key: str, steam_ids: list[str]) -> list[dict
         resp.raise_for_status()
         data = resp.json()
     players = (
-        data.get("response", {}).get("players")
-        if isinstance(data, dict)
-        else None
+        data.get("response", {}).get("players") if isinstance(data, dict) else None
     )
     return list(players or [])
 
@@ -316,22 +349,31 @@ def _upsert_cache(
         .first()
     )
     if row is None:
-        row = IdentityCache(
-            platform=platform,
-            external_id=external_id,
-            display_name=display_name,
-            profile_url=profile_url,
-            avatar_url=avatar_url,
-            source=source,
-            updated_at=_utcnow(),
+        db.add(
+            IdentityCache(
+                platform=platform,
+                external_id=external_id,
+                display_name=display_name,
+                profile_url=profile_url or "",
+                avatar_url=avatar_url or "",
+                source=source or "",
+                updated_at=_utcnow(),
+            )
         )
-        db.add(row)
-    else:
-        row.display_name = display_name or row.display_name
-        row.profile_url = profile_url or row.profile_url
-        row.avatar_url = avatar_url or row.avatar_url
-        row.source = source or row.source
-        row.updated_at = _utcnow()
+        return
+
+    # Prefer non-empty updates; keep richer avatar/profile when new ones are blank
+    if display_name:
+        row.display_name = display_name
+    if profile_url:
+        row.profile_url = profile_url
+    if avatar_url:
+        row.avatar_url = avatar_url
+    if source:
+        # Prefer steam_api over presence once we have API data
+        if source == "steam_api" or row.source != "steam_api":
+            row.source = source
+    row.updated_at = _utcnow()
 
 
 def steam_api_configured() -> bool:
