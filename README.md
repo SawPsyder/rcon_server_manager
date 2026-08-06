@@ -96,7 +96,7 @@ Services:
 |----------|-------------|
 | `ADMIN_PASSWORD` | Initial admin password (hashed on first boot) |
 | `SECRET_KEY` | Session cookie signing secret |
-| `ENCRYPTION_KEY` | Fernet key for RCON passwords at rest |
+| `ENCRYPTION_KEY` | Fernet key for RCON passwords at rest (must be `Fernet.generate_key()` output; leave empty to auto-generate under `DATA_DIR`) |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Database credentials |
 | `DATABASE_URL` | Optional full SQLAlchemy URL (Compose builds from `POSTGRES_*` when unset) |
 | `DATA_DIR` | App data dir for encryption key file (default `/data`; **not** the SQL store in Compose) |
