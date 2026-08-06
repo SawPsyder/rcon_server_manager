@@ -183,7 +183,9 @@ class PlayerNoteOut(BaseModel):
 
 
 class PlayerNoteCreate(BaseModel):
-    body: str = Field(min_length=1, max_length=4000)
+    """Full note document body. Empty string clears the note."""
+
+    body: str = Field(default="", max_length=20000)
 
 
 class IdentityDossierOut(BaseModel):

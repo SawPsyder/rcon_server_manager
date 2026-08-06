@@ -84,7 +84,6 @@ GAMEMODE_LABELS: dict[str, str] = {
 
 # Hardcoded dashboard shortcuts (not user-editable)
 QUICK_BUTTONS = (
-    QuickButton("List Players", "listplayers"),
     QuickButton("List Maps", "maps"),
     QuickButton("Restart Round", "restartround 0"),
 )

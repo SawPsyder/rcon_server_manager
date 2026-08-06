@@ -68,8 +68,27 @@ class PlayerCountSample(Base):
     players: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_players: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     online: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # JSON list of {name, steamid?} present at sample time (empty string if unknown)
+    roster_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
     server: Mapped[Server] = relationship(back_populates="player_samples")
+
+
+class ChartShare(Base):
+    """Public unguessable share token for a server player-count chart."""
+
+    __tablename__ = "chart_shares"
+    __table_args__ = (
+        UniqueConstraint("server_id", name="uq_chart_share_server"),
+        Index("ix_chart_shares_token", "token", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    server: Mapped[Server] = relationship()
 
 
 class PlayerServerStats(Base):

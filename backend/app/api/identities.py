@@ -16,11 +16,11 @@ from app.schemas import (
     PlayerNoteOut,
 )
 from app.services.player_records import (
-    add_note,
     batch_has_records,
     delete_note,
     get_dossier,
     normalize_identity,
+    set_note,
 )
 
 router = APIRouter(prefix="/api/identities", tags=["identities"])
@@ -69,24 +69,28 @@ def identity_dossier(
     )
 
 
-@router.post("/{platform}/{external_id}/notes", response_model=PlayerNoteOut)
-def create_note(
+@router.put("/{platform}/{external_id}/notes", response_model=None)
+@router.post("/{platform}/{external_id}/notes", response_model=None)
+def upsert_note(
     platform: str,
     external_id: str,
     body: PlayerNoteCreate,
     db: Session = Depends(get_db),
     _admin: str = Depends(require_admin),
-) -> PlayerNoteOut:
+) -> PlayerNoteOut | Response:
+    """Set the single admin note document for this identity (empty body clears → 204)."""
     try:
-        note = add_note(
+        note = set_note(
             db,
             platform=platform,
             external_id=external_id,
             body=body.body,
         )
         db.commit()
+        if note is None:
+            return Response(status_code=204)
         db.refresh(note)
-        return note
+        return PlayerNoteOut.model_validate(note)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

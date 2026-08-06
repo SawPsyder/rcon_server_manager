@@ -1,10 +1,12 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth";
 import Layout from "./components/Layout";
-import DashboardPage from "./pages/DashboardPage";
 import LoginPage from "./pages/LoginPage";
+import OverviewPage from "./pages/OverviewPage";
+import ServerDetailPage from "./pages/ServerDetailPage";
 import ServersPage from "./pages/ServersPage";
 import SettingsPage from "./pages/SettingsPage";
+import SharedChartPage from "./pages/SharedChartPage";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { loading, authenticated } = useAuth();
@@ -24,6 +26,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* Public share — no session required */}
+      <Route path="/share/c/:token" element={<SharedChartPage />} />
       <Route
         path="/"
         element={
@@ -32,7 +36,8 @@ export default function App() {
           </Protected>
         }
       >
-        <Route index element={<DashboardPage />} />
+        <Route index element={<OverviewPage />} />
+        <Route path="server/:serverId" element={<ServerDetailPage />} />
         <Route path="servers" element={<ServersPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>

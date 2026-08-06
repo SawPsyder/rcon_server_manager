@@ -232,6 +232,58 @@ def get_dossier(db: Session, platform: str, external_id: str) -> dict[str, Any]:
     }
 
 
+def set_note(
+    db: Session,
+    *,
+    platform: str,
+    external_id: str,
+    body: str,
+) -> PlayerAdminNote | None:
+    """
+    Upsert a single admin note document for this identity.
+    Empty body clears all notes. Multiple legacy rows are collapsed into one.
+    """
+    platform = platform.strip().lower()
+    external_id = external_id.strip()
+    if not external_id:
+        raise ValueError("external_id is required")
+    text = body if body is not None else ""
+    now = datetime.now(timezone.utc)
+
+    existing = (
+        db.query(PlayerAdminNote)
+        .filter(
+            PlayerAdminNote.platform == platform,
+            PlayerAdminNote.external_id == external_id,
+        )
+        .order_by(PlayerAdminNote.created_at.asc())
+        .all()
+    )
+
+    if not text.strip():
+        for row in existing:
+            db.delete(row)
+        return None
+
+    if existing:
+        note = existing[0]
+        note.body = text
+        note.updated_at = now
+        for row in existing[1:]:
+            db.delete(row)
+        return note
+
+    note = PlayerAdminNote(
+        platform=platform,
+        external_id=external_id,
+        body=text,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(note)
+    return note
+
+
 def add_note(
     db: Session,
     *,
@@ -239,21 +291,10 @@ def add_note(
     external_id: str,
     body: str,
 ) -> PlayerAdminNote:
-    body = (body or "").strip()
-    if not body:
+    """Backward-compatible alias: set non-empty note body."""
+    note = set_note(db, platform=platform, external_id=external_id, body=body)
+    if note is None:
         raise ValueError("Note body is required")
-    platform = platform.strip().lower()
-    external_id = external_id.strip()
-    if not external_id:
-        raise ValueError("external_id is required")
-    note = PlayerAdminNote(
-        platform=platform,
-        external_id=external_id,
-        body=body,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-    db.add(note)
     return note
 
 

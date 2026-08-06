@@ -207,18 +207,31 @@ export type PlayerStatPoint = {
   players: number;
   max_players: number;
   online: boolean;
+  /** Names present at this sample (empty for legacy samples). */
+  player_names?: string[];
 };
 
 export type PlayerStats = {
-  server_id: number;
+  /** Present on admin API only; omitted from public share stats. */
+  server_id?: number;
   range: StatsRange;
   from_time: string;
   to_time: string;
-  sample_count: number;
   points: PlayerStatPoint[];
   current_players: number | null;
   peak_players: number | null;
   avg_players: number | null;
+};
+
+export type ChartShare = {
+  token: string;
+  url_path: string;
+  created_at: string;
+};
+
+export type PublicChartMeta = {
+  token: string;
+  server_name: string;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -299,6 +312,18 @@ export const api = {
   status: (id: number) => request<ServerStatus>(`/api/servers/${id}/status`),
   playerStats: (id: number, range: StatsRange = "24h") =>
     request<PlayerStats>(`/api/servers/${id}/player-stats?range=${range}`),
+
+  createChartShare: (id: number) =>
+    request<ChartShare>(`/api/servers/${id}/chart-share`, { method: "POST" }),
+  getChartShare: (id: number) => request<ChartShare>(`/api/servers/${id}/chart-share`),
+  deleteChartShare: (id: number) =>
+    request<void>(`/api/servers/${id}/chart-share`, { method: "DELETE" }),
+  publicChartMeta: (token: string) =>
+    request<PublicChartMeta>(`/api/public/charts/${encodeURIComponent(token)}/meta`),
+  publicChartStats: (token: string, range: StatsRange = "24h") =>
+    request<PlayerStats>(
+      `/api/public/charts/${encodeURIComponent(token)}/stats?range=${range}`
+    ),
   rcon: (id: number, command: string) =>
     request<RconResult>(`/api/servers/${id}/rcon`, {
       method: "POST",
@@ -353,13 +378,12 @@ export const api = {
     request<IdentityDossier>(
       `/api/identities/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}`
     ),
-  addIdentityNote: (platform: string, externalId: string, body: string) =>
-    request<PlayerNote>(
+  /** Upsert the single admin note document (empty body clears). */
+  setIdentityNote: (platform: string, externalId: string, body: string) =>
+    request<PlayerNote | null>(
       `/api/identities/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}/notes`,
-      { method: "POST", body: JSON.stringify({ body }) }
+      { method: "PUT", body: JSON.stringify({ body }) }
     ),
-  deleteIdentityNote: (noteId: number) =>
-    request<void>(`/api/identities/notes/${noteId}`, { method: "DELETE" }),
   travel: (
     id: number,
     body: {
