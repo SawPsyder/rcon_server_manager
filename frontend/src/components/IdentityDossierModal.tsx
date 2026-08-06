@@ -154,6 +154,10 @@ export default function IdentityDossierModal({
           <>
             <section style={{ marginTop: "1.1rem" }}>
               <h3 style={{ margin: "0 0 0.5rem" }}>Moderation history</h3>
+              <p className="muted" style={{ margin: "0 0 0.5rem", fontSize: "0.85rem" }}>
+                Shared across <strong>all servers</strong> in this manager (keyed by platform id).
+                A ban on server A appears here when you open this player on server B.
+              </p>
               {dossier.actions.length === 0 ? (
                 <p className="muted">No kick / ban / unban actions recorded yet.</p>
               ) : (
@@ -194,6 +198,9 @@ export default function IdentityDossierModal({
 
             <section style={{ marginTop: "1.1rem" }}>
               <h3 style={{ margin: "0 0 0.5rem" }}>Admin notes</h3>
+              <p className="muted" style={{ margin: "0 0 0.5rem", fontSize: "0.85rem" }}>
+                Notes are global for this identity, not tied to a single server.
+              </p>
               {dossier.notes.length === 0 ? (
                 <p className="muted">No notes yet.</p>
               ) : (

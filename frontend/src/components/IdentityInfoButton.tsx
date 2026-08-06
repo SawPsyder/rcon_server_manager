@@ -17,7 +17,12 @@ export default function IdentityInfoButton({
       type="button"
       className={`info-btn ${hasInfo ? "has-info" : "no-info"}`}
       disabled={disabled}
-      title={title || (hasInfo ? "View player history & notes" : "Player info (no records yet)")}
+      title={
+        title ||
+        (hasInfo
+          ? "Player history & notes (all servers)"
+          : "Player info (no records yet across any server)")
+      }
       onClick={(e) => {
         e.stopPropagation();
         onClick();
