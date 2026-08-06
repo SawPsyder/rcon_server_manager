@@ -36,12 +36,30 @@ Local development without Docker can still use **SQLite** (default when `DATABAS
 
 ### Publish a release image
 
+Use the helper script (recommended) — analyses commits since the last `v*` tag,
+merges `develop` → `master`, creates an annotated tag, pushes, and opens a GitHub Release:
+
+```bash
+# Inspect only
+python scripts/release.py analyse
+python scripts/release.py analyse --bump minor
+
+# Full release (requires clean tree, git + gh auth)
+python scripts/release.py release --bump patch --yes
+
+# Preview commands without changing remotes / GitHub
+python scripts/release.py release --bump patch --dry-run
+```
+
+Manual equivalent:
+
 ```bash
 git checkout master
 git merge develop   # when ready
 git push origin master
 git tag -a v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
+gh release create v0.1.0 --target master --title "RCON Server Manager v0.1.0" --notes-file notes.md
 ```
 
 The [Docker release workflow](.github/workflows/docker-release.yml) only publishes if the tag points at a commit on `master`.
