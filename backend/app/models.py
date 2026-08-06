@@ -202,3 +202,45 @@ class IdentityCache(Base):
     # steam_api | presence | manual
     source: Mapped[str] = mapped_column(String(32), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PlayerActionLog(Base):
+    """Kick / ban / permban / unban (and similar) history keyed by platform id."""
+
+    __tablename__ = "player_action_logs"
+    __table_args__ = (
+        Index("ix_player_actions_identity", "platform", "external_id"),
+        Index("ix_player_actions_server", "server_id"),
+        Index("ix_player_actions_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False, default="steam")
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    # kick | ban | permban | unban
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    server_id: Mapped[int | None] = mapped_column(
+        ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    server_name: Mapped[str] = mapped_column(String(255), default="")
+    player_name: Mapped[str] = mapped_column(String(255), default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    # e.g. ban duration minutes
+    detail: Mapped[str] = mapped_column(String(255), default="")
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PlayerAdminNote(Base):
+    """Admin free-text notes attached to a platform identity."""
+
+    __tablename__ = "player_admin_notes"
+    __table_args__ = (Index("ix_player_notes_identity", "platform", "external_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False, default="steam")
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

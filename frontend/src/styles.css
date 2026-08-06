@@ -320,6 +320,121 @@ textarea:focus {
   text-decoration: underline;
 }
 
+.info-btn {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-style: italic;
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.info-btn.no-info {
+  background: transparent;
+  color: var(--muted);
+  border-color: #3a4555;
+}
+
+.info-btn.has-info {
+  background: rgba(61, 139, 253, 0.18);
+  color: #9ec5ff;
+  border-color: rgba(61, 139, 253, 0.55);
+}
+
+.info-btn:hover:not(:disabled) {
+  border-color: var(--accent-2);
+  color: #cfe2ff;
+}
+
+.info-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.name-with-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 100%;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(4, 8, 14, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  backdrop-filter: blur(4px);
+}
+
+.modal-card {
+  width: min(920px, 100%);
+  max-height: min(88vh, 900px);
+  overflow: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 1.1rem 1.2rem 1.25rem;
+}
+
+.note-card {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+}
+
+.action-pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.12rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.action-pill.action-kick {
+  color: #f0c57a;
+  border-color: rgba(232, 162, 58, 0.45);
+}
+
+.action-pill.action-ban,
+.action-pill.action-permban {
+  color: #f5a0a6;
+  border-color: rgba(240, 113, 120, 0.45);
+}
+
+.action-pill.action-unban {
+  color: #9ee0b0;
+  border-color: rgba(127, 217, 154, 0.4);
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 4rem;
+  background: #0f141c;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+}
+
 .alert {
   border-radius: 10px;
   padding: 0.65rem 0.8rem;

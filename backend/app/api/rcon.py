@@ -21,6 +21,7 @@ from app.schemas import (
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
 from app.server_types.sandstorm import build_travel_command, map_gamemodes, parse_listbans
 from app.services.identity import resolve_names, steam_api_configured
+from app.services.player_records import log_player_action
 from app.services.rcon import RconError, run_rcon
 
 router = APIRouter(tags=["rcon"])
@@ -70,6 +71,34 @@ def _exec(db: Session, server_id: int, command: str) -> RconCommandResponse:
         return RconCommandResponse(command=command, response="", ok=False, error=str(exc))
 
 
+def _log_moderation(
+    db: Session,
+    server,
+    *,
+    action: str,
+    result: RconCommandResponse,
+    player_name: str = "",
+    net_id: str = "",
+    reason: str = "",
+    detail: str = "",
+) -> None:
+    try:
+        log_player_action(
+            db,
+            server=server,
+            action=action,
+            net_id=net_id,
+            player_name=player_name,
+            reason=reason,
+            detail=detail,
+            ok=result.ok,
+            error=result.error or "",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 @router.post("/api/servers/{server_id}/rcon", response_model=RconCommandResponse)
 def rcon_command(
     server_id: int,
@@ -103,7 +132,17 @@ def kick_player(
     _require_feature(server, "kick_ban")
     reason = body.reason.strip() or "Kicked by admin"
     cmd = f'kick "{body.player_name}" "{reason}"'
-    return _exec(db, server_id, cmd)
+    result = _exec(db, server_id, cmd)
+    _log_moderation(
+        db,
+        server,
+        action="kick",
+        result=result,
+        player_name=body.player_name,
+        net_id=body.net_id,
+        reason=reason,
+    )
+    return result
 
 
 @router.post("/api/servers/{server_id}/players/ban", response_model=RconCommandResponse)
@@ -118,7 +157,18 @@ def ban_player(
     minutes = body.ban_minutes or 60
     reason = body.reason.strip() or "Banned by admin"
     cmd = f'ban "{body.player_name}" "{minutes}" "{reason}"'
-    return _exec(db, server_id, cmd)
+    result = _exec(db, server_id, cmd)
+    _log_moderation(
+        db,
+        server,
+        action="ban",
+        result=result,
+        player_name=body.player_name,
+        net_id=body.net_id,
+        reason=reason,
+        detail=f"{minutes} minutes",
+    )
+    return result
 
 
 @router.post("/api/servers/{server_id}/players/permban", response_model=RconCommandResponse)
@@ -132,7 +182,18 @@ def permban_player(
     _require_feature(server, "kick_ban")
     reason = body.reason.strip() or "Permanently banned by admin"
     cmd = f'permban "{body.player_name}" "{reason}"'
-    return _exec(db, server_id, cmd)
+    result = _exec(db, server_id, cmd)
+    _log_moderation(
+        db,
+        server,
+        action="permban",
+        result=result,
+        player_name=body.player_name,
+        net_id=body.net_id,
+        reason=reason,
+        detail="permanent",
+    )
+    return result
 
 
 @router.post("/api/servers/{server_id}/players/unban", response_model=RconCommandResponse)
@@ -144,7 +205,17 @@ def unban_player(
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
     _require_feature(server, "kick_ban")
-    return _exec(db, server_id, f'unban "{body.net_id.strip()}"')
+    net_id = body.net_id.strip()
+    result = _exec(db, server_id, f'unban "{net_id}"')
+    _log_moderation(
+        db,
+        server,
+        action="unban",
+        result=result,
+        net_id=net_id,
+        reason="",
+    )
+    return result
 
 
 @router.get("/api/servers/{server_id}/bans", response_model=BanListOut)

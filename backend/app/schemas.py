@@ -146,10 +146,67 @@ class PlayerActionRequest(BaseModel):
     player_name: str = Field(min_length=1)
     reason: str = ""
     ban_minutes: int | None = Field(default=None, ge=1)
+    # Platform net id when known (SteamID64, SteamNWI:…, EOS:…)
+    net_id: str = ""
 
 
 class UnbanRequest(BaseModel):
     net_id: str = Field(min_length=1)
+
+
+class PlayerActionLogOut(BaseModel):
+    id: int
+    platform: str
+    external_id: str
+    action: str
+    server_id: int | None = None
+    server_name: str = ""
+    player_name: str = ""
+    reason: str = ""
+    detail: str = ""
+    ok: bool = True
+    error: str = ""
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PlayerNoteOut(BaseModel):
+    id: int
+    platform: str
+    external_id: str
+    body: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PlayerNoteCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class IdentityDossierOut(BaseModel):
+    platform: str
+    external_id: str
+    display_name: str = ""
+    profile_url: str = ""
+    avatar_url: str = ""
+    has_info: bool = False
+    actions: list[PlayerActionLogOut] = Field(default_factory=list)
+    notes: list[PlayerNoteOut] = Field(default_factory=list)
+
+
+class IdentityFlagsRequest(BaseModel):
+    """Batch check whether identities have notes/history."""
+
+    identities: list[dict[str, str]] = Field(default_factory=list)
+    # each: { "platform": "steam", "external_id": "7656…" } or { "net_id": "SteamNWI:…" }
+
+
+class IdentityFlagsOut(BaseModel):
+    # key = "platform:external_id"
+    flags: dict[str, bool] = Field(default_factory=dict)
 
 
 class BanEntryOut(BaseModel):

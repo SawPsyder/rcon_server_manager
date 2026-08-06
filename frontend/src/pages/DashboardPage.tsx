@@ -4,13 +4,17 @@ import {
   api,
   AppSettings,
   BanEntry,
+  identityKey,
   MapConfig,
+  parseIdentity,
   QuickButton,
   Server,
   ServerStatus,
   ServerTypeInfo,
 } from "../api";
 import BanListPanel from "../components/BanListPanel";
+import IdentityDossierModal from "../components/IdentityDossierModal";
+import IdentityInfoButton from "../components/IdentityInfoButton";
 import PlayerStatsChart from "../components/PlayerStatsChart";
 
 const SELECTED_KEY = "rsm_selected_server";
@@ -47,6 +51,7 @@ export default function DashboardPage() {
   const [output, setOutput] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<string>("");
+  const [selectedNetId, setSelectedNetId] = useState<string>("");
   const [sayMsg, setSayMsg] = useState("");
   const [unbanId, setUnbanId] = useState("");
   const [bans, setBans] = useState<BanEntry[]>([]);
@@ -55,6 +60,10 @@ export default function DashboardPage() {
   const [bansLoading, setBansLoading] = useState(false);
   const [showBansRaw, setShowBansRaw] = useState(false);
   const [steamLookupEnabled, setSteamLookupEnabled] = useState(false);
+  const [identityFlags, setIdentityFlags] = useState<Record<string, boolean>>({});
+  const [dossierOpen, setDossierOpen] = useState(false);
+  const [dossierNetId, setDossierNetId] = useState("");
+  const [dossierName, setDossierName] = useState("");
 
   const [mapId, setMapId] = useState<number | "">("");
   const [gamemode, setGamemode] = useState("");
@@ -89,6 +98,27 @@ export default function DashboardPage() {
     const st = selectedServer?.server_type || status?.server_type || "sandstorm";
     return serverTypes.find((t) => t.id === st)?.quick_buttons || [];
   }, [selectedServer, status, serverTypes]);
+
+  const refreshIdentityFlags = useCallback(async (netIds: string[]) => {
+    const identities = netIds
+      .map((n) => parseIdentity(n))
+      .filter((x): x is { platform: string; external_id: string } => Boolean(x))
+      .map((x) => ({ platform: x.platform, external_id: x.external_id }));
+    if (!identities.length) return;
+    try {
+      const res = await api.identityFlags(identities);
+      setIdentityFlags((prev) => ({ ...prev, ...(res.flags || {}) }));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const openDossier = (netId: string, name?: string) => {
+    if (!parseIdentity(netId)) return;
+    setDossierNetId(netId);
+    setDossierName(name || "");
+    setDossierOpen(true);
+  };
 
   const loadBase = useCallback(async () => {
     const [sv, st, ty] = await Promise.all([
@@ -144,6 +174,10 @@ export default function DashboardPage() {
             : srv
         )
       );
+      const steamIds = (s.player_list || [])
+        .map((p) => p.steamid || "")
+        .filter(Boolean);
+      if (steamIds.length) refreshIdentityFlags(steamIds);
     } catch (e) {
       setStatus((prev) => ({
         online: false,
@@ -161,7 +195,7 @@ export default function DashboardPage() {
         error: e instanceof Error ? e.message : String(e),
       }));
     }
-  }, [serverId]);
+  }, [serverId, refreshIdentityFlags]);
 
   useEffect(() => {
     loadBase().catch((e) => setOutput(String(e)));
@@ -241,6 +275,8 @@ export default function DashboardPage() {
             ? "Response received but no ban rows could be parsed — try Show raw."
             : ""
         );
+        const ids = (res.bans || []).map((b) => b.raw_id).filter(Boolean);
+        if (ids.length) refreshIdentityFlags(ids);
       }
     } catch (e) {
       setBans([]);
@@ -248,7 +284,7 @@ export default function DashboardPage() {
     } finally {
       setBansLoading(false);
     }
-  }, [serverId]);
+  }, [serverId, refreshIdentityFlags]);
 
   const runRcon = async (command: string, title = "RCON") => {
     if (!serverId) return;
@@ -275,6 +311,8 @@ export default function DashboardPage() {
           setOutput(
             `[List Bans] listbans\n\nParsed ${(res.bans || []).length} ban(s). See table below.`
           );
+          const ids = (res.bans || []).map((b) => b.raw_id).filter(Boolean);
+          if (ids.length) refreshIdentityFlags(ids);
         }
       } catch (e) {
         setBansError(e instanceof Error ? e.message : String(e));
@@ -305,6 +343,7 @@ export default function DashboardPage() {
       showResult("Unban", res);
       if (res.ok) {
         await loadBans();
+        refreshIdentityFlags([netId]);
       }
     } catch (e) {
       setOutput(String(e));
@@ -424,7 +463,10 @@ export default function DashboardPage() {
                   <tr
                     key={`${p.steamid || p.id}-${p.name}`}
                     className={selectedPlayer === p.name ? "selected" : ""}
-                    onClick={() => setSelectedPlayer(p.name)}
+                    onClick={() => {
+                      setSelectedPlayer(p.name);
+                      setSelectedNetId(p.steamid || "");
+                    }}
                   >
                     <td>
                       <span
@@ -438,7 +480,24 @@ export default function DashboardPage() {
                       </span>
                     </td>
                     <td>{p.id}</td>
-                    <td>{p.name}</td>
+                    <td>
+                      <span className="name-with-info">
+                        <span>{p.name}</span>
+                        {p.steamid ? (
+                          <IdentityInfoButton
+                            hasInfo={(() => {
+                              const id = parseIdentity(p.steamid);
+                              return id
+                                ? Boolean(
+                                    identityFlags[identityKey(id.platform, id.external_id)]
+                                  )
+                                : false;
+                            })()}
+                            onClick={() => openDossier(p.steamid!, p.name)}
+                          />
+                        ) : null}
+                      </span>
+                    </td>
                     <td>{p.score}</td>
                     <td>{p.session_pretty || "0s"}</td>
                     <td>{p.total_pretty || "0s"}</td>
@@ -469,10 +528,11 @@ export default function DashboardPage() {
                   if (!serverId || !selectedPlayer) return;
                   setBusy(true);
                   api
-                    .kick(serverId, selectedPlayer, reason)
+                    .kick(serverId, selectedPlayer, reason, selectedNetId)
                     .then((r) => {
                       showResult("Kick", r);
                       refreshStatus();
+                      if (selectedNetId) refreshIdentityFlags([selectedNetId]);
                     })
                     .finally(() => setBusy(false));
                 }}
@@ -488,10 +548,11 @@ export default function DashboardPage() {
                   if (!serverId || !selectedPlayer) return;
                   setBusy(true);
                   api
-                    .ban(serverId, selectedPlayer, minutes, reason)
+                    .ban(serverId, selectedPlayer, minutes, reason, selectedNetId)
                     .then((r) => {
                       showResult("Ban", r);
                       refreshStatus();
+                      if (selectedNetId) refreshIdentityFlags([selectedNetId]);
                     })
                     .finally(() => setBusy(false));
                 }}
@@ -507,10 +568,11 @@ export default function DashboardPage() {
                   if (!serverId || !selectedPlayer) return;
                   setBusy(true);
                   api
-                    .permban(serverId, selectedPlayer, reason)
+                    .permban(serverId, selectedPlayer, reason, selectedNetId)
                     .then((r) => {
                       showResult("Permban", r);
                       refreshStatus();
+                      if (selectedNetId) refreshIdentityFlags([selectedNetId]);
                     })
                     .finally(() => setBusy(false));
                 }}
@@ -552,8 +614,10 @@ export default function DashboardPage() {
           error={bansError}
           busy={busy}
           steamLookupEnabled={steamLookupEnabled}
+          identityFlags={identityFlags}
           onRefresh={loadBans}
           onUnban={unbanPlayer}
+          onOpenIdentity={openDossier}
           raw={bansRaw}
           showRaw={showBansRaw}
           onToggleRaw={() => setShowBansRaw((v) => !v)}
@@ -712,6 +776,16 @@ export default function DashboardPage() {
         )}
         <pre className="console-out">{output || "RCON output will appear here."}</pre>
       </section>
+
+      <IdentityDossierModal
+        open={dossierOpen}
+        netId={dossierNetId}
+        fallbackName={dossierName}
+        onClose={() => setDossierOpen(false)}
+        onChanged={() => {
+          if (dossierNetId) refreshIdentityFlags([dossierNetId]);
+        }}
+      />
     </div>
   );
 }

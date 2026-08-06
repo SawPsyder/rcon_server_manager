@@ -131,6 +131,58 @@ export type BanList = {
   steam_lookup_enabled?: boolean;
 };
 
+export type PlayerActionLog = {
+  id: number;
+  platform: string;
+  external_id: string;
+  action: string;
+  server_id?: number | null;
+  server_name: string;
+  player_name: string;
+  reason: string;
+  detail: string;
+  ok: boolean;
+  error: string;
+  created_at: string;
+};
+
+export type PlayerNote = {
+  id: number;
+  platform: string;
+  external_id: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type IdentityDossier = {
+  platform: string;
+  external_id: string;
+  display_name: string;
+  profile_url: string;
+  avatar_url: string;
+  has_info: boolean;
+  actions: PlayerActionLog[];
+  notes: PlayerNote[];
+};
+
+/** Normalize net id to platform + external_id for identity APIs. */
+export function parseIdentity(netId: string): { platform: string; external_id: string } | null {
+  const raw = (netId || "").trim();
+  if (!raw) return null;
+  const steamNwi = raw.match(/^SteamNWI:(\d{17})$/i);
+  if (steamNwi) return { platform: "steam", external_id: steamNwi[1] };
+  if (/^\d{17}$/.test(raw)) return { platform: "steam", external_id: raw };
+  if (/^EOS:/i.test(raw)) return { platform: "eos", external_id: raw.slice(4) };
+  const anySteam = raw.match(/(\d{17})/);
+  if (anySteam) return { platform: "steam", external_id: anySteam[1] };
+  return { platform: "unknown", external_id: raw };
+}
+
+export function identityKey(platform: string, externalId: string): string {
+  return `${platform}:${externalId}`;
+}
+
 export type TypeSettings = {
   preferred_gamemode: string;
 };
@@ -251,20 +303,26 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
-  kick: (id: number, player_name: string, reason = "") =>
+  kick: (id: number, player_name: string, reason = "", net_id = "") =>
     request<RconResult>(`/api/servers/${id}/players/kick`, {
       method: "POST",
-      body: JSON.stringify({ player_name, reason }),
+      body: JSON.stringify({ player_name, reason, net_id }),
     }),
-  ban: (id: number, player_name: string, ban_minutes: number, reason = "") =>
+  ban: (
+    id: number,
+    player_name: string,
+    ban_minutes: number,
+    reason = "",
+    net_id = ""
+  ) =>
     request<RconResult>(`/api/servers/${id}/players/ban`, {
       method: "POST",
-      body: JSON.stringify({ player_name, ban_minutes, reason }),
+      body: JSON.stringify({ player_name, ban_minutes, reason, net_id }),
     }),
-  permban: (id: number, player_name: string, reason = "") =>
+  permban: (id: number, player_name: string, reason = "", net_id = "") =>
     request<RconResult>(`/api/servers/${id}/players/permban`, {
       method: "POST",
-      body: JSON.stringify({ player_name, reason }),
+      body: JSON.stringify({ player_name, reason, net_id }),
     }),
   unban: (id: number, net_id: string) =>
     request<RconResult>(`/api/servers/${id}/players/unban`, {
@@ -272,6 +330,23 @@ export const api = {
       body: JSON.stringify({ net_id }),
     }),
   bans: (id: number) => request<BanList>(`/api/servers/${id}/bans`),
+
+  identityFlags: (identities: { platform?: string; external_id?: string; net_id?: string; steamid?: string }[]) =>
+    request<{ flags: Record<string, boolean> }>("/api/identities/flags", {
+      method: "POST",
+      body: JSON.stringify({ identities }),
+    }),
+  identityDossier: (platform: string, externalId: string) =>
+    request<IdentityDossier>(
+      `/api/identities/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}`
+    ),
+  addIdentityNote: (platform: string, externalId: string, body: string) =>
+    request<PlayerNote>(
+      `/api/identities/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}/notes`,
+      { method: "POST", body: JSON.stringify({ body }) }
+    ),
+  deleteIdentityNote: (noteId: number) =>
+    request<void>(`/api/identities/notes/${noteId}`, { method: "DELETE" }),
   travel: (
     id: number,
     body: {

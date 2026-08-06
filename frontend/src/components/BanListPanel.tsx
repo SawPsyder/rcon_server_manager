@@ -1,4 +1,5 @@
-import { BanEntry } from "../api";
+import { BanEntry, identityKey, parseIdentity } from "../api";
+import IdentityInfoButton from "./IdentityInfoButton";
 
 type Props = {
   bans: BanEntry[];
@@ -6,8 +7,10 @@ type Props = {
   error: string;
   busy: boolean;
   steamLookupEnabled?: boolean;
+  identityFlags?: Record<string, boolean>;
   onRefresh: () => void;
   onUnban: (netId: string) => void;
+  onOpenIdentity: (netId: string, name?: string) => void;
   raw?: string;
   showRaw: boolean;
   onToggleRaw: () => void;
@@ -19,8 +22,10 @@ export default function BanListPanel({
   error,
   busy,
   steamLookupEnabled,
+  identityFlags = {},
   onRefresh,
   onUnban,
+  onOpenIdentity,
   raw,
   showRaw,
   onToggleRaw,
@@ -95,7 +100,7 @@ export default function BanListPanel({
                     </span>
                   </td>
                   <td>
-                    <div className="row" style={{ gap: "0.5rem" }}>
+                    <div className="name-with-info">
                       {b.avatar_url ? (
                         <img
                           src={b.avatar_url}
@@ -127,6 +132,15 @@ export default function BanListPanel({
                           </div>
                         ) : null}
                       </div>
+                      <IdentityInfoButton
+                        hasInfo={(() => {
+                          const id = parseIdentity(b.raw_id);
+                          return id
+                            ? Boolean(identityFlags[identityKey(id.platform, id.external_id)])
+                            : false;
+                        })()}
+                        onClick={() => onOpenIdentity(b.raw_id, b.display_name)}
+                      />
                     </div>
                   </td>
                   <td>
