@@ -18,8 +18,27 @@ const RANGES: { value: StatsRange; label: string }[] = [
   { value: "1y", label: "1y" },
 ];
 
+const DEFAULT_REFRESH_MS = 60_000;
+
 type Props = {
-  serverId: number | null;
+  /** Admin (authenticated) chart for a server */
+  serverId?: number | null;
+  /** Public share token (no login) */
+  shareToken?: string | null;
+  /** Dense layout for overview rows */
+  compact?: boolean;
+  /** Poll interval for data refresh (default 60s) */
+  refreshMs?: number;
+  /** Show share link control (admin only) */
+  showShare?: boolean;
+};
+
+type ChartPoint = {
+  t: string;
+  players: number;
+  max_players: number;
+  online: boolean;
+  player_names: string[];
 };
 
 function formatTick(iso: string, range: StatsRange): string {
@@ -40,109 +59,253 @@ function formatTooltipTime(iso: string): string {
   return d.toLocaleString();
 }
 
-export default function PlayerStatsChart({ serverId }: Props) {
+function stopRowClick(e: React.SyntheticEvent) {
+  e.stopPropagation();
+}
+
+function ChartTooltip({
+  active,
+  payload,
+  label,
+  showNameHints,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload?: ChartPoint; value?: number }>;
+  label?: string;
+  /** Admin charts: show empty/missing-name hints. Public shares: count only. */
+  showNameHints?: boolean;
+}) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0]?.payload;
+  if (!point) return null;
+  const names = point.player_names || [];
+  const count = Math.round(Number(point.players) || 0);
+  const max = Math.round(Number(point.max_players) || 0);
+  const online = Boolean(point.online);
+
+  return (
+    <div className="chart-tooltip" onClick={stopRowClick}>
+      <div className="chart-tooltip-head">
+        <div className="chart-tooltip-meta">
+          <span className={`chart-tooltip-dot ${online ? "on" : "off"}`} aria-hidden />
+          <span className="chart-tooltip-time">
+            {formatTooltipTime(String(label ?? point.t))}
+          </span>
+        </div>
+        <div className="chart-tooltip-count">
+          <strong>{count}</strong>
+          {max > 0 ? <span className="chart-tooltip-max">/{max}</span> : null}
+        </div>
+      </div>
+      {names.length > 0 ? (
+        <ul className="chart-tooltip-names">
+          {names.map((n, i) => (
+            <li key={`${n}-${i}`}>
+              <span className="chart-tooltip-avatar" aria-hidden>
+                {(n.trim().charAt(0) || "?").toUpperCase()}
+              </span>
+              <span className="chart-tooltip-name">{n}</span>
+            </li>
+          ))}
+        </ul>
+      ) : showNameHints ? (
+        count > 0 ? (
+          <div className="chart-tooltip-empty">No names for this sample</div>
+        ) : (
+          <div className="chart-tooltip-empty">Empty</div>
+        )
+      ) : null}
+    </div>
+  );
+}
+
+export default function PlayerStatsChart({
+  serverId = null,
+  shareToken = null,
+  compact = false,
+  refreshMs = DEFAULT_REFRESH_MS,
+  showShare = false,
+}: Props) {
   const [range, setRange] = useState<StatsRange>("24h");
   const [stats, setStats] = useState<PlayerStats | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareMsg, setShareMsg] = useState("");
+
+  const hasSource = Boolean(shareToken) || (serverId != null && serverId > 0);
 
   const load = useCallback(async () => {
-    if (!serverId) {
+    if (!hasSource) {
       setStats(null);
       return;
     }
     setLoading(true);
     setError("");
     try {
-      const data = await api.playerStats(serverId, range);
+      const data = shareToken
+        ? await api.publicChartStats(shareToken, range)
+        : await api.playerStats(serverId as number, range);
       setStats(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [serverId, range]);
+  }, [hasSource, shareToken, serverId, range]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // Refresh chart periodically so new samples appear
   useEffect(() => {
-    if (!serverId) return;
-    const t = window.setInterval(load, 60_000);
+    if (!hasSource || refreshMs <= 0) return;
+    const t = window.setInterval(load, refreshMs);
     return () => window.clearInterval(t);
-  }, [serverId, load]);
+  }, [hasSource, refreshMs, load]);
+
+  const onShare = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!serverId || shareBusy) return;
+    setShareBusy(true);
+    setShareMsg("");
+    try {
+      const share = await api.createChartShare(serverId);
+      const url = `${window.location.origin}${share.url_path}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        setShareMsg("Link copied");
+      } catch {
+        setShareMsg(url);
+      }
+      window.setTimeout(() => setShareMsg(""), 4000);
+    } catch (err) {
+      setShareMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const onRevokeShare = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!serverId || shareBusy) return;
+    if (!confirm("Revoke the public chart link? Anyone with it will lose access.")) return;
+    setShareBusy(true);
+    setShareMsg("");
+    try {
+      await api.deleteChartShare(serverId);
+      setShareMsg("Share revoked");
+      window.setTimeout(() => setShareMsg(""), 3000);
+    } catch (err) {
+      setShareMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setShareBusy(false);
+    }
+  };
 
   const chartData = useMemo(
     () =>
-      (stats?.points || []).map((p) => ({
-        t: p.t,
-        players: p.players,
-        max_players: p.max_players,
-        online: p.online,
-      })),
+      (stats?.points || []).map(
+        (p): ChartPoint => ({
+          t: p.t,
+          players: p.players,
+          max_players: p.max_players,
+          online: p.online,
+          player_names: p.player_names || [],
+        })
+      ),
     [stats]
   );
 
-  if (!serverId) {
+  const fillId = `playersFill-${shareToken || serverId || "none"}`;
+  const chartHeight = compact ? 160 : 280;
+  // Roster tooltips + missing-name hints only for authenticated admin charts
+  const showNameHints = !shareToken;
+
+  if (!hasSource) {
     return null;
   }
 
   return (
-    <section className="card chart-card">
-      <div className="row between wrap">
-        <div>
-          <h2 style={{ marginBottom: 0 }}>Player count</h2>
-          <p className="muted" style={{ margin: "0.25rem 0 0" }}>
-            Background sampling runs continuously; history is kept indefinitely.
-          </p>
+    <section className={`card chart-card${compact ? " chart-card-compact" : ""}`}>
+      <div className="row between wrap" style={{ alignItems: "center" }}>
+        <div className="chart-summary row wrap">
+          <span className="chip">
+            Peak: <strong>{stats?.peak_players ?? "—"}</strong>
+          </span>
+          <span className="chip">
+            Avg: <strong>{stats?.avg_players ?? "—"}</strong>
+          </span>
+          <span className="chip">
+            Latest: <strong>{stats?.current_players ?? "—"}</strong>
+          </span>
         </div>
-        <div className="range-tabs" role="tablist" aria-label="Chart timespan">
-          {RANGES.map((r) => (
-            <button
-              key={r.value}
-              type="button"
-              role="tab"
-              aria-selected={range === r.value}
-              className={`btn small ${range === r.value ? "primary" : "ghost"}`}
-              onClick={() => setRange(r.value)}
-            >
-              {r.label}
-            </button>
-          ))}
+        <div className="row wrap" style={{ alignItems: "center", gap: "0.5rem" }}>
+          {showShare && serverId ? (
+            <div className="chart-share-controls" onClick={stopRowClick}>
+              <button
+                type="button"
+                className="btn small ghost"
+                disabled={shareBusy}
+                onClick={onShare}
+                title="Copy public chart link"
+              >
+                Share
+              </button>
+              <button
+                type="button"
+                className="btn small ghost"
+                disabled={shareBusy}
+                onClick={onRevokeShare}
+                title="Revoke public chart link"
+              >
+                Unshare
+              </button>
+              {shareMsg ? <span className="chart-share-msg muted">{shareMsg}</span> : null}
+            </div>
+          ) : null}
+          <div
+            className="range-tabs"
+            role="tablist"
+            aria-label="Chart timespan"
+            onClick={stopRowClick}
+            onKeyDown={stopRowClick}
+          >
+            {RANGES.map((r) => (
+              <button
+                key={r.value}
+                type="button"
+                role="tab"
+                aria-selected={range === r.value}
+                className={`btn small ${range === r.value ? "primary" : "ghost"}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRange(r.value);
+                }}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="chart-summary row wrap" style={{ marginTop: "0.75rem" }}>
-        <span className="chip">
-          Samples: <strong>{stats?.sample_count ?? "—"}</strong>
-        </span>
-        <span className="chip">
-          Peak: <strong>{stats?.peak_players ?? "—"}</strong>
-        </span>
-        <span className="chip">
-          Avg: <strong>{stats?.avg_players ?? "—"}</strong>
-        </span>
-        <span className="chip">
-          Latest: <strong>{stats?.current_players ?? "—"}</strong>
-        </span>
-        {loading && <span className="muted">Updating…</span>}
-      </div>
+      {error && (
+        <div className="alert error" style={{ marginTop: "0.75rem" }}>
+          {error}
+        </div>
+      )}
 
-      {error && <div className="alert error" style={{ marginTop: "0.75rem" }}>{error}</div>}
-
-      <div className="chart-wrap">
+      <div className={`chart-wrap${compact ? " chart-wrap-compact" : ""}`}>
         {chartData.length === 0 ? (
-          <div className="chart-empty muted">
-            No samples yet for this timespan. Data appears after the collector runs
-            (default every 60s).
+          <div className={`chart-empty muted${compact ? " chart-empty-compact" : ""}`}>
+            {loading ? "Loading…" : "No data yet"}
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={chartHeight}>
             <AreaChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
               <defs>
-                <linearGradient id="playersFill" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#e8a23a" stopOpacity={0.45} />
                   <stop offset="100%" stopColor="#e8a23a" stopOpacity={0.02} />
                 </linearGradient>
@@ -163,24 +326,15 @@ export default function PlayerStatsChart({ serverId }: Props) {
                 domain={[0, (dataMax: number) => Math.max(1, Math.ceil(dataMax))]}
               />
               <Tooltip
-                contentStyle={{
-                  background: "#151b24",
-                  border: "1px solid #2a3544",
-                  borderRadius: 8,
-                  color: "#e7eef8",
-                }}
-                labelFormatter={(label) => formatTooltipTime(String(label))}
-                formatter={(value: number, name: string) => [
-                  value,
-                  name === "players" ? "Players" : name,
-                ]}
+                content={<ChartTooltip showNameHints={showNameHints} />}
+                cursor={{ stroke: "#e8a23a", strokeWidth: 1, strokeOpacity: 0.45 }}
               />
               <Area
                 type="monotone"
                 dataKey="players"
                 stroke="#e8a23a"
                 strokeWidth={2}
-                fill="url(#playersFill)"
+                fill={`url(#${fillId})`}
                 isAnimationActive={false}
                 dot={false}
                 activeDot={{ r: 4, fill: "#e8a23a" }}

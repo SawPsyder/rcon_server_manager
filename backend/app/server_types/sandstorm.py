@@ -7,7 +7,7 @@ import re
 import time
 from typing import Any
 
-from app.server_types.base import ServerFeatures, ServerTypeInfo
+from app.server_types.base import QuickButton, ServerFeatures, ServerTypeInfo
 from app.services.query import QueryError, SourceQuery
 from app.services.rcon import RconError
 
@@ -82,13 +82,89 @@ GAMEMODE_LABELS: dict[str, str] = {
     "ambush": "Ambush",
 }
 
-DEFAULT_BUTTONS = (
-    ("List Bans", "listbans", 0),
-    ("List Maps", "maps", 1),
-    ("Restart Round", "restartround 0", 2),
+# Hardcoded dashboard shortcuts (not user-editable)
+QUICK_BUTTONS = (
+    QuickButton("List Maps", "maps"),
+    QuickButton("Restart Round", "restartround 0"),
 )
 
 DEFAULT_PREFERRED_GAMEMODE = "checkpoint"
+
+# listbans entries are often concatenated without newlines, e.g.
+# 7656… Permanent (reason)SteamNWI:7656… Permanent (reason)EOS:… Permanent (reason)
+BAN_ENTRY_RE = re.compile(
+    r"(?P<raw_id>"
+    r"SteamNWI:\d{17}"
+    r"|EOS:[0-9a-fA-F|]+"
+    r"|\d{17}"
+    r")\s+"
+    r"(?P<duration>"
+    r"Permanent"
+    r"|Temporary"
+    r"|\d+\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?)?"
+    r")"
+    r"\s*"
+    r"(?:\((?P<reason>[^)]*)\))?",
+    re.IGNORECASE,
+)
+
+
+def parse_listbans(text: str) -> list[dict[str, Any]]:
+    """Parse Sandstorm RCON listbans into structured ban records."""
+    if not text:
+        return []
+    raw = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Drop obvious command echo / headers
+    cleaned_lines: list[str] = []
+    for line in raw.split("\n"):
+        s = line.strip()
+        if not s:
+            continue
+        low = s.lower()
+        if low in {"listbans", "bans", "id", "banned"}:
+            continue
+        cleaned_lines.append(s)
+    blob = " ".join(cleaned_lines) if cleaned_lines else raw
+
+    bans: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, m in enumerate(BAN_ENTRY_RE.finditer(blob), start=1):
+        raw_id = m.group("raw_id").strip()
+        if raw_id in seen:
+            continue
+        seen.add(raw_id)
+        duration = (m.group("duration") or "").strip()
+        reason = (m.group("reason") or "").strip()
+        platform, net_id, display_id = _classify_ban_id(raw_id)
+        bans.append(
+            {
+                "index": i,
+                "platform": platform,
+                "raw_id": raw_id,
+                "net_id": net_id,
+                "display_id": display_id,
+                "duration": duration or "—",
+                "reason": reason or "—",
+                "permanent": duration.lower() == "permanent" if duration else False,
+            }
+        )
+    return bans
+
+
+def _classify_ban_id(raw_id: str) -> tuple[str, str, str]:
+    """
+    Return (platform, net_id_for_unban, display_id).
+    unban typically wants the id as listbans shows it (quoted).
+    """
+    rid = raw_id.strip()
+    if rid.upper().startswith("STEAMNWI:"):
+        steam = rid.split(":", 1)[1]
+        return "Steam (NWI)", rid, steam
+    if rid.upper().startswith("EOS:"):
+        return "Epic (EOS)", rid, rid[4:]
+    if re.fullmatch(r"\d{17}", rid):
+        return "Steam", rid, rid
+    return "Unknown", rid, rid
 
 
 def _is_human_netid(netid: str) -> bool:
@@ -231,6 +307,7 @@ class SandstormAdapter:
             admin_say=True,
             a2s_query=True,
         ),
+        quick_buttons=QUICK_BUTTONS,
     )
     allowed_rcon_prefixes = ALLOWED_COMMAND_PREFIXES
 

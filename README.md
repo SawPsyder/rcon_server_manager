@@ -24,7 +24,8 @@ Local development without Docker can still use **SQLite** (default when `DATABAS
 - Type-aware player list, kick/ban, map travel (Sandstorm)
 - **Persistent RCON connections** (avoids Sandstorm per-connect thread leak)
 - RCON console with per-type command allowlist
-- Hybrid config: type defaults + optional per-server overrides
+- Hybrid config: type defaults + optional per-server preferred gamemode
+- Hardcoded per-type quick RCON buttons (List Players, List Bans, List Maps, Restart Round for Sandstorm)
 
 ## Branches & releases
 
@@ -102,6 +103,8 @@ Services:
 | `DATA_DIR` | App data dir for encryption key file (default `/data`; **not** the SQL store in Compose) |
 | `SESSION_HTTPS_ONLY` | Set `true` behind HTTPS reverse proxy |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | SQLAlchemy pool tuning |
+| `STEAM_WEB_API_KEY` | Optional; resolve SteamID64 → persona name on ban list ([get a key](https://steamcommunity.com/dev/apikey)). Results are stored in DB `identity_cache` and reused. |
+| `IDENTITY_CACHE_TTL_SECONDS` | Only used when force-refreshing stale Steam API entries (default 7 days). Cache hits with a name never require a new API call. |
 
 Generate a Fernet key:
 

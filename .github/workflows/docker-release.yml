@@ -27,6 +27,10 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: docker-release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
 
@@ -34,6 +38,7 @@ jobs:
   build-and-push:
     name: Build & push image
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,7 +66,7 @@ jobs:
           REPO=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
           echo "image=${{ env.REGISTRY }}/${OWNER}/${REPO}" >> "$GITHUB_OUTPUT"
 
-      - name: Docker metadata
+      - name: Docker metadata (version tags only)
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -69,7 +74,6 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -81,7 +85,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # Push version tags first (0.0.2, 0.0) so a rate-limit on :latest does not
+      # leave the release without a usable version tag.
+      - name: Build and push version tags
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -91,3 +97,28 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Optional :latest — retry a few times if GHCR secondary rate limit hits.
+      - name: Push latest tag
+        if: ${{ !contains(github.ref_name, '-') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.meta_name.outputs.image }}"
+          # Prefer full version from metadata (first tag line)
+          VERSION_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1 | tr -d '\r')
+          if [ -z "$VERSION_TAG" ]; then
+            echo "No version tag to promote to latest"
+            exit 0
+          fi
+          for attempt in 1 2 3 4 5; do
+            echo "Push latest (attempt $attempt) from $VERSION_TAG"
+            if docker buildx imagetools create -t "${IMAGE}:latest" "$VERSION_TAG"; then
+              echo "latest updated"
+              exit 0
+            fi
+            echo "latest push failed; waiting before retry..."
+            sleep $((attempt * 30))
+          done
+          echo "::warning::Could not update :latest after retries (version tags were still pushed)."
+          exit 0

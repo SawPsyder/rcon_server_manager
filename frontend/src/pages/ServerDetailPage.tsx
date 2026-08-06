@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import {
   api,
   AppSettings,
-  CustomButton,
+  BanEntry,
+  identityKey,
   MapConfig,
+  parseIdentity,
+  QuickButton,
   Server,
   ServerStatus,
+  ServerTypeInfo,
 } from "../api";
+import BanListPanel from "../components/BanListPanel";
+import IdentityDossierModal from "../components/IdentityDossierModal";
+import IdentityInfoButton from "../components/IdentityInfoButton";
 import PlayerStatsChart from "../components/PlayerStatsChart";
-
-const SELECTED_KEY = "rsm_selected_server";
+import { overviewBackSearch } from "./OverviewPage";
 
 /** Seed status cards immediately from last cached poll (no wait for live query). */
 function statusFromServerCache(server: Server): ServerStatus {
@@ -32,20 +38,42 @@ function statusFromServerCache(server: Server): ServerStatus {
   };
 }
 
-export default function DashboardPage() {
+export default function ServerDetailPage() {
+  const { serverId: serverIdParam } = useParams<{ serverId: string }>();
+  const location = useLocation();
+  const serverId = Number(serverIdParam);
+  const validServerId = Number.isFinite(serverId) && serverId > 0 ? serverId : null;
+  const backSearch = overviewBackSearch(location.state);
+
   const [servers, setServers] = useState<Server[]>([]);
-  const [serverId, setServerId] = useState<number | null>(null);
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [maps, setMaps] = useState<MapConfig[]>([]);
   const [labels, setLabels] = useState<Record<string, string>>({});
-  const [buttons, setButtons] = useState<CustomButton[]>([]);
+  const [serverTypes, setServerTypes] = useState<ServerTypeInfo[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [rconCmd, setRconCmd] = useState("");
   const [output, setOutput] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<string>("");
+  const [selectedNetId, setSelectedNetId] = useState<string>("");
   const [sayMsg, setSayMsg] = useState("");
   const [unbanId, setUnbanId] = useState("");
+  const [bans, setBans] = useState<BanEntry[]>([]);
+  const [bansRaw, setBansRaw] = useState("");
+  const [bansError, setBansError] = useState("");
+  const [bansLoading, setBansLoading] = useState(false);
+  const [showBansRaw, setShowBansRaw] = useState(false);
+  const [steamLookupEnabled, setSteamLookupEnabled] = useState(false);
+  const [bansFromCache, setBansFromCache] = useState(false);
+  const [bansFetchedAt, setBansFetchedAt] = useState<string | null>(null);
+  const [bansPage, setBansPage] = useState(1);
+  const [bansPageSize] = useState(25);
+  const [bansTotal, setBansTotal] = useState(0);
+  const [bansTotalPages, setBansTotalPages] = useState(1);
+  const [identityFlags, setIdentityFlags] = useState<Record<string, boolean>>({});
+  const [dossierOpen, setDossierOpen] = useState(false);
+  const [dossierNetId, setDossierNetId] = useState("");
+  const [dossierName, setDossierName] = useState("");
 
   const [mapId, setMapId] = useState<number | "">("");
   const [gamemode, setGamemode] = useState("");
@@ -53,8 +81,8 @@ export default function DashboardPage() {
   const [travelPreview, setTravelPreview] = useState("");
 
   const selectedServer = useMemo(
-    () => servers.find((s) => s.id === serverId) || null,
-    [servers, serverId]
+    () => (validServerId ? servers.find((s) => s.id === validServerId) || null : null),
+    [servers, validServerId]
   );
 
   const features = status?.features || {
@@ -76,45 +104,63 @@ export default function DashboardPage() {
     return settings?.types?.[st]?.preferred_gamemode || "";
   }, [selectedServer, status, settings]);
 
+  const quickButtons: QuickButton[] = useMemo(() => {
+    const st = selectedServer?.server_type || status?.server_type || "sandstorm";
+    return serverTypes.find((t) => t.id === st)?.quick_buttons || [];
+  }, [selectedServer, status, serverTypes]);
+
+  const refreshIdentityFlags = useCallback(async (netIds: string[]) => {
+    const identities = netIds
+      .map((n) => parseIdentity(n))
+      .filter((x): x is { platform: string; external_id: string } => Boolean(x))
+      .map((x) => ({ platform: x.platform, external_id: x.external_id }));
+    if (!identities.length) return;
+    try {
+      const res = await api.identityFlags(identities);
+      setIdentityFlags((prev) => ({ ...prev, ...(res.flags || {}) }));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const openDossier = (netId: string, name?: string) => {
+    if (!parseIdentity(netId)) return;
+    setDossierNetId(netId);
+    setDossierName(name || "");
+    setDossierOpen(true);
+  };
+
   const loadBase = useCallback(async () => {
-    const [sv, st] = await Promise.all([api.listServers(), api.settings()]);
+    const [sv, st, ty] = await Promise.all([
+      api.listServers(),
+      api.settings(),
+      api.serverTypes(),
+    ]);
     setServers(sv);
     setSettings(st);
-
-    const stored = localStorage.getItem(SELECTED_KEY);
-    const preferred = stored ? Number(stored) : null;
-    if (preferred && sv.some((s) => s.id === preferred)) {
-      setServerId(preferred);
-    } else if (sv.length) {
-      setServerId(sv[0].id);
-    }
+    setServerTypes(ty);
   }, []);
 
   const loadServerExtras = useCallback(async (server: Server) => {
     const st = server.server_type || "sandstorm";
     try {
-      const [mp, lb, bt] = await Promise.all([
-        api.maps(st),
-        api.gamemodeLabels(st),
-        api.serverButtons(server.id),
-      ]);
+      const [mp, lb] = await Promise.all([api.maps(st), api.gamemodeLabels(st)]);
       setMaps(mp);
       setLabels(lb);
-      setButtons(bt);
     } catch (e) {
       setOutput(String(e));
     }
   }, []);
 
   const refreshStatus = useCallback(async () => {
-    if (!serverId) return;
+    if (!validServerId) return;
     try {
-      const s = await api.status(serverId);
+      const s = await api.status(validServerId);
       setStatus(s);
       // Keep server list cache in sync so re-select stays instant
       setServers((prev) =>
         prev.map((srv) =>
-          srv.id === serverId
+          srv.id === validServerId
             ? {
                 ...srv,
                 last_hostname: s.hostname ?? srv.last_hostname,
@@ -130,6 +176,10 @@ export default function DashboardPage() {
             : srv
         )
       );
+      const steamIds = (s.player_list || [])
+        .map((p) => p.steamid || "")
+        .filter(Boolean);
+      if (steamIds.length) refreshIdentityFlags(steamIds);
     } catch (e) {
       setStatus((prev) => ({
         online: false,
@@ -147,31 +197,27 @@ export default function DashboardPage() {
         error: e instanceof Error ? e.message : String(e),
       }));
     }
-  }, [serverId]);
+  }, [validServerId, refreshIdentityFlags]);
 
   useEffect(() => {
     loadBase().catch((e) => setOutput(String(e)));
   }, [loadBase]);
 
   useEffect(() => {
-    if (!serverId) return;
-    localStorage.setItem(SELECTED_KEY, String(serverId));
+    if (!validServerId || !selectedServer) return;
     // Seed from list payload already returned by /api/servers (includes last_*)
-    const server = servers.find((s) => s.id === serverId);
-    if (server) {
-      setStatus(statusFromServerCache(server));
-      loadServerExtras(server);
-    }
+    setStatus(statusFromServerCache(selectedServer));
+    loadServerExtras(selectedServer);
     refreshStatus();
-    // Only re-seed when the selected server changes — not when cache fields update after poll
+    // Only re-seed when the selected server id changes — not when cache fields update after poll
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: avoid loop with setServers in refreshStatus
-  }, [serverId, refreshStatus, loadServerExtras]);
+  }, [validServerId, selectedServer?.id, refreshStatus, loadServerExtras]);
 
   useEffect(() => {
-    if (!serverId || !settings) return;
+    if (!validServerId || !settings) return;
     const t = window.setInterval(refreshStatus, settings.poll_interval_seconds * 1000);
     return () => window.clearInterval(t);
-  }, [serverId, settings, refreshStatus]);
+  }, [validServerId, settings, refreshStatus]);
 
   useEffect(() => {
     if (!selectedMap) {
@@ -208,11 +254,102 @@ export default function DashboardPage() {
     setOutput(`[${title}] ${res.command}\n\n${body}`);
   };
 
+  const applyBanList = useCallback(
+    (res: Awaited<ReturnType<typeof api.bans>>) => {
+      setSteamLookupEnabled(Boolean(res.steam_lookup_enabled));
+      setBansFromCache(Boolean(res.from_cache));
+      setBansFetchedAt(res.fetched_at || null);
+      setBans(res.bans || []);
+      setBansRaw(res.raw || "");
+      setBansPage(res.page || 1);
+      setBansTotal(res.total ?? 0);
+      setBansTotalPages(res.total_pages || 1);
+      if (!res.ok) {
+        setBansError(res.error || "Failed to load bans");
+      } else {
+        setBansError(
+          (res.bans || []).length === 0 && (res.total ?? 0) === 0 && res.raw
+            ? "Response received but no ban rows could be parsed — try Show raw."
+            : res.error || ""
+        );
+      }
+      const ids = (res.bans || []).map((b) => b.raw_id).filter(Boolean);
+      if (ids.length) refreshIdentityFlags(ids);
+    },
+    [refreshIdentityFlags]
+  );
+
+  /** Load bans from DB cache (default) or live RCON when refresh=true. */
+  const loadBans = useCallback(
+    async (opts?: { refresh?: boolean; page?: number }) => {
+      if (!validServerId) return;
+      const page = opts?.page ?? bansPage;
+      const refresh = Boolean(opts?.refresh);
+      setBansLoading(true);
+      setBansError("");
+      try {
+        const res = await api.bans(validServerId, {
+          refresh,
+          page,
+          page_size: bansPageSize,
+        });
+        applyBanList(res);
+      } catch (e) {
+        setBans([]);
+        setBansError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBansLoading(false);
+      }
+    },
+    [validServerId, bansPage, bansPageSize, applyBanList]
+  );
+
+  // Load cached bans when switching server
+  useEffect(() => {
+    if (!validServerId || !features.kick_ban) {
+      setBans([]);
+      setBansRaw("");
+      setBansFetchedAt(null);
+      setBansPage(1);
+      setBansTotal(0);
+      setBansTotalPages(1);
+      return;
+    }
+    setBansPage(1);
+    loadBans({ refresh: false, page: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when server changes
+  }, [validServerId, features.kick_ban]);
+
   const runRcon = async (command: string, title = "RCON") => {
-    if (!serverId) return;
+    if (!validServerId) return;
+    const cmd = command.trim();
+    // Manual listbans in console still refreshes the ban cache/table
+    if (cmd.toLowerCase() === "listbans") {
+      setBusy(true);
+      try {
+        const res = await api.bans(validServerId, {
+          refresh: true,
+          page: 1,
+          page_size: bansPageSize,
+        });
+        applyBanList(res);
+        setOutput(
+          res.ok
+            ? `[List Bans] listbans\n\nCached ${res.total ?? 0} ban(s). See table below.`
+            : `[List Bans] listbans\n\n${res.error || "failed"}`
+        );
+      } catch (e) {
+        setBansError(e instanceof Error ? e.message : String(e));
+        setOutput(String(e));
+      } finally {
+        setBusy(false);
+        setBansLoading(false);
+      }
+      return;
+    }
     setBusy(true);
     try {
-      const res = await api.rcon(serverId, command);
+      const res = await api.rcon(validServerId, cmd);
       showResult(title, res);
       await refreshStatus();
     } catch (e) {
@@ -221,6 +358,47 @@ export default function DashboardPage() {
       setBusy(false);
     }
   };
+
+  const unbanPlayer = async (netId: string) => {
+    if (!validServerId) return;
+    setBusy(true);
+    try {
+      const res = await api.unban(validServerId, netId);
+      showResult("Unban", res);
+      if (res.ok) {
+        await loadBans({ refresh: false, page: bansPage });
+        refreshIdentityFlags([netId]);
+      }
+    } catch (e) {
+      setOutput(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!validServerId) {
+    return (
+      <div className="card">
+        <h2>Invalid server</h2>
+        <p className="muted">That server id is not valid.</p>
+        <Link className="btn primary" to={{ pathname: "/", search: backSearch }}>
+          Back to overview
+        </Link>
+      </div>
+    );
+  }
+
+  if (servers.length > 0 && !selectedServer) {
+    return (
+      <div className="card">
+        <h2>Server not found</h2>
+        <p className="muted">No server with id {validServerId} is configured.</p>
+        <Link className="btn primary" to={{ pathname: "/", search: backSearch }}>
+          Back to overview
+        </Link>
+      </div>
+    );
+  }
 
   if (!servers.length) {
     return (
@@ -237,20 +415,11 @@ export default function DashboardPage() {
   return (
     <div className="stack">
       <div className="row between wrap">
-        <div className="row wrap">
-          <label className="inline">
-            Server
-            <select
-              value={serverId ?? ""}
-              onChange={(e) => setServerId(Number(e.target.value))}
-            >
-              {servers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="row wrap" style={{ alignItems: "center" }}>
+          <Link className="btn ghost" to={{ pathname: "/", search: backSearch }}>
+            ← Back to overview
+          </Link>
+          <h1 className="server-detail-title">{selectedServer?.name || "Server"}</h1>
           <button className="btn" onClick={() => refreshStatus()} disabled={busy}>
             Refresh
           </button>
@@ -293,7 +462,7 @@ export default function DashboardPage() {
 
       {status?.error && <div className="alert error">{status.error}</div>}
 
-      <PlayerStatsChart serverId={serverId} />
+      <PlayerStatsChart serverId={validServerId} showShare />
 
       <section className="card">
         <h2>Players</h2>
@@ -333,7 +502,10 @@ export default function DashboardPage() {
                   <tr
                     key={`${p.steamid || p.id}-${p.name}`}
                     className={selectedPlayer === p.name ? "selected" : ""}
-                    onClick={() => setSelectedPlayer(p.name)}
+                    onClick={() => {
+                      setSelectedPlayer(p.name);
+                      setSelectedNetId(p.steamid || "");
+                    }}
                   >
                     <td>
                       <span
@@ -347,7 +519,24 @@ export default function DashboardPage() {
                       </span>
                     </td>
                     <td>{p.id}</td>
-                    <td>{p.name}</td>
+                    <td>
+                      <span className="name-with-info">
+                        <span>{p.name}</span>
+                        {p.steamid ? (
+                          <IdentityInfoButton
+                            hasInfo={(() => {
+                              const id = parseIdentity(p.steamid);
+                              return id
+                                ? Boolean(
+                                    identityFlags[identityKey(id.platform, id.external_id)]
+                                  )
+                                : false;
+                            })()}
+                            onClick={() => openDossier(p.steamid!, p.name)}
+                          />
+                        ) : null}
+                      </span>
+                    </td>
                     <td>{p.score}</td>
                     <td>{p.session_pretty || "0s"}</td>
                     <td>{p.total_pretty || "0s"}</td>
@@ -372,16 +561,17 @@ export default function DashboardPage() {
             <div className="row wrap" style={{ marginTop: "0.75rem" }}>
               <button
                 className="btn"
-                disabled={!selectedPlayer || busy || !serverId}
+                disabled={!selectedPlayer || busy || !validServerId}
                 onClick={() => {
                   const reason = prompt("Kick reason", "Kicked by admin") || "";
-                  if (!serverId || !selectedPlayer) return;
+                  if (!validServerId || !selectedPlayer) return;
                   setBusy(true);
                   api
-                    .kick(serverId, selectedPlayer, reason)
+                    .kick(validServerId, selectedPlayer, reason, selectedNetId)
                     .then((r) => {
                       showResult("Kick", r);
                       refreshStatus();
+                      if (selectedNetId) refreshIdentityFlags([selectedNetId]);
                     })
                     .finally(() => setBusy(false));
                 }}
@@ -390,17 +580,18 @@ export default function DashboardPage() {
               </button>
               <button
                 className="btn"
-                disabled={!selectedPlayer || busy || !serverId}
+                disabled={!selectedPlayer || busy || !validServerId}
                 onClick={() => {
                   const minutes = Number(prompt("Ban minutes", "60") || "60");
                   const reason = prompt("Ban reason", "Banned by admin") || "";
-                  if (!serverId || !selectedPlayer) return;
+                  if (!validServerId || !selectedPlayer) return;
                   setBusy(true);
                   api
-                    .ban(serverId, selectedPlayer, minutes, reason)
+                    .ban(validServerId, selectedPlayer, minutes, reason, selectedNetId)
                     .then((r) => {
                       showResult("Ban", r);
                       refreshStatus();
+                      if (selectedNetId) refreshIdentityFlags([selectedNetId]);
                     })
                     .finally(() => setBusy(false));
                 }}
@@ -409,17 +600,18 @@ export default function DashboardPage() {
               </button>
               <button
                 className="btn danger"
-                disabled={!selectedPlayer || busy || !serverId}
+                disabled={!selectedPlayer || busy || !validServerId}
                 onClick={() => {
                   if (!confirm(`Permban ${selectedPlayer}?`)) return;
                   const reason = prompt("Reason", "Permanently banned") || "";
-                  if (!serverId || !selectedPlayer) return;
+                  if (!validServerId || !selectedPlayer) return;
                   setBusy(true);
                   api
-                    .permban(serverId, selectedPlayer, reason)
+                    .permban(validServerId, selectedPlayer, reason, selectedNetId)
                     .then((r) => {
                       showResult("Permban", r);
                       refreshStatus();
+                      if (selectedNetId) refreshIdentityFlags([selectedNetId]);
                     })
                     .finally(() => setBusy(false));
                 }}
@@ -429,7 +621,7 @@ export default function DashboardPage() {
               {features.structured_player_list && (
                 <button
                   className="btn ghost"
-                  disabled={busy || !serverId}
+                  disabled={busy || !validServerId}
                   onClick={() => runRcon("listplayers", "ListPlayers")}
                 >
                   List player IDs
@@ -438,21 +630,14 @@ export default function DashboardPage() {
             </div>
             <div className="row wrap" style={{ marginTop: "0.75rem" }}>
               <input
-                placeholder="Steam NetID to unban"
+                placeholder="Manual unban: Steam / SteamNWI:… / EOS:…"
                 value={unbanId}
                 onChange={(e) => setUnbanId(e.target.value)}
               />
               <button
                 className="btn"
-                disabled={!unbanId || busy || !serverId}
-                onClick={() => {
-                  if (!serverId) return;
-                  setBusy(true);
-                  api
-                    .unban(serverId, unbanId)
-                    .then((r) => showResult("Unban", r))
-                    .finally(() => setBusy(false));
-                }}
+                disabled={!unbanId || busy || !validServerId}
+                onClick={() => unbanPlayer(unbanId.trim())}
               >
                 Unban
               </button>
@@ -515,12 +700,12 @@ export default function DashboardPage() {
             <div className="full">
               <button
                 className="btn primary"
-                disabled={!serverId || !mapId || !gamemode || busy}
+                disabled={!validServerId || !mapId || !gamemode || busy}
                 onClick={() => {
-                  if (!serverId || !mapId || !gamemode) return;
+                  if (!validServerId || !mapId || !gamemode) return;
                   setBusy(true);
                   api
-                    .travel(serverId, {
+                    .travel(validServerId, {
                       map_id: Number(mapId),
                       gamemode_key: gamemode,
                       lighting,
@@ -543,11 +728,11 @@ export default function DashboardPage() {
       <section className="card">
         <h2>RCON console</h2>
         <div className="row wrap">
-          {buttons.map((b) => (
+          {quickButtons.map((b) => (
             <button
-              key={b.id}
+              key={b.command}
               className="btn"
-              disabled={busy || !serverId}
+              disabled={busy || !validServerId}
               onClick={() => runRcon(b.command, b.label)}
             >
               {b.label}
@@ -566,7 +751,7 @@ export default function DashboardPage() {
           />
           <button
             className="btn primary"
-            disabled={!rconCmd.trim() || busy || !serverId}
+            disabled={!rconCmd.trim() || busy || !validServerId}
             onClick={() => runRcon(rconCmd.trim())}
           >
             Execute
@@ -580,10 +765,10 @@ export default function DashboardPage() {
               onChange={(e) => setSayMsg(e.target.value)}
               placeholder="Admin say message"
               onKeyDown={(e) => {
-                if (e.key === "Enter" && sayMsg.trim() && serverId) {
+                if (e.key === "Enter" && sayMsg.trim() && validServerId) {
                   setBusy(true);
                   api
-                    .say(serverId, sayMsg.trim())
+                    .say(validServerId, sayMsg.trim())
                     .then((r) => {
                       showResult("Say", r);
                       setSayMsg("");
@@ -594,12 +779,12 @@ export default function DashboardPage() {
             />
             <button
               className="btn"
-              disabled={!sayMsg.trim() || busy || !serverId}
+              disabled={!sayMsg.trim() || busy || !validServerId}
               onClick={() => {
-                if (!serverId) return;
+                if (!validServerId) return;
                 setBusy(true);
                 api
-                  .say(serverId, sayMsg.trim())
+                  .say(validServerId, sayMsg.trim())
                   .then((r) => {
                     showResult("Say", r);
                     setSayMsg("");
@@ -613,6 +798,43 @@ export default function DashboardPage() {
         )}
         <pre className="console-out">{output || "RCON output will appear here."}</pre>
       </section>
+
+      {features.kick_ban && (
+        <BanListPanel
+          bans={bans}
+          loading={bansLoading}
+          error={bansError}
+          busy={busy}
+          steamLookupEnabled={steamLookupEnabled}
+          fromCache={bansFromCache}
+          fetchedAt={bansFetchedAt}
+          page={bansPage}
+          pageSize={bansPageSize}
+          total={bansTotal}
+          totalPages={bansTotalPages}
+          identityFlags={identityFlags}
+          onRefresh={() => loadBans({ refresh: true, page: 1 })}
+          onPageChange={(p) => {
+            setBansPage(p);
+            loadBans({ refresh: false, page: p });
+          }}
+          onUnban={unbanPlayer}
+          onOpenIdentity={openDossier}
+          raw={bansRaw}
+          showRaw={showBansRaw}
+          onToggleRaw={() => setShowBansRaw((v) => !v)}
+        />
+      )}
+
+      <IdentityDossierModal
+        open={dossierOpen}
+        netId={dossierNetId}
+        fallbackName={dossierName}
+        onClose={() => setDossierOpen(false)}
+        onChanged={() => {
+          if (dossierNetId) refreshIdentityFlags([dossierNetId]);
+        }}
+      />
     </div>
   );
 }

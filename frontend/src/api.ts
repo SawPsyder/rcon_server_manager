@@ -6,12 +6,18 @@ export type ServerFeatures = {
   a2s_query: boolean;
 };
 
+export type QuickButton = {
+  label: string;
+  command: string;
+};
+
 export type ServerTypeInfo = {
   id: string;
   label: string;
   default_query_port: number;
   default_rcon_port: number;
   features: ServerFeatures;
+  quick_buttons: QuickButton[];
 };
 
 export type Server = {
@@ -94,21 +100,94 @@ export type MapConfig = {
   lightings: string[];
 };
 
-export type CustomButton = {
-  id: number;
-  label: string;
-  command: string;
-  sort_order: number;
-  server_type?: string;
-  server_id?: number | null;
-};
-
 export type RconResult = {
   command: string;
   response: string;
   ok: boolean;
   error?: string | null;
 };
+
+export type BanEntry = {
+  index: number;
+  platform: string;
+  raw_id: string;
+  net_id: string;
+  display_id: string;
+  duration: string;
+  reason: string;
+  permanent: boolean;
+  display_name?: string;
+  profile_url?: string;
+  avatar_url?: string;
+  name_source?: string;
+};
+
+export type BanList = {
+  server_id: number;
+  bans: BanEntry[];
+  raw: string;
+  ok: boolean;
+  error?: string | null;
+  steam_lookup_enabled?: boolean;
+  from_cache?: boolean;
+  fetched_at?: string | null;
+  page?: number;
+  page_size?: number;
+  total?: number;
+  total_pages?: number;
+};
+
+export type PlayerActionLog = {
+  id: number;
+  platform: string;
+  external_id: string;
+  action: string;
+  server_id?: number | null;
+  server_name: string;
+  player_name: string;
+  reason: string;
+  detail: string;
+  ok: boolean;
+  error: string;
+  created_at: string;
+};
+
+export type PlayerNote = {
+  id: number;
+  platform: string;
+  external_id: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type IdentityDossier = {
+  platform: string;
+  external_id: string;
+  display_name: string;
+  profile_url: string;
+  avatar_url: string;
+  has_info: boolean;
+  actions: PlayerActionLog[];
+  notes: PlayerNote[];
+};
+
+/** Normalize net id to platform + external_id for identity APIs. */
+export function parseIdentity(netId: string): { platform: string; external_id: string } | null {
+  const raw = (netId || "").trim();
+  if (!raw) return null;
+  const steamNwi = raw.match(/^SteamNWI:(\d{17})$/i);
+  if (steamNwi) return { platform: "steam", external_id: steamNwi[1] };
+  if (/^\d{17}$/.test(raw)) return { platform: "steam", external_id: raw };
+  if (/^EOS:/i.test(raw)) return { platform: "eos", external_id: raw.slice(4) };
+  const anySteam = raw.match(/(\d{17})/);
+  if (anySteam) return { platform: "steam", external_id: anySteam[1] };
+  return { platform: "unknown", external_id: raw };
+}
+
+export function identityKey(platform: string, externalId: string): string {
+  return `${platform}:${externalId}`;
+}
 
 export type TypeSettings = {
   preferred_gamemode: string;
@@ -128,24 +207,31 @@ export type PlayerStatPoint = {
   players: number;
   max_players: number;
   online: boolean;
+  /** Names present at this sample (empty for legacy samples). */
+  player_names?: string[];
 };
 
 export type PlayerStats = {
-  server_id: number;
+  /** Present on admin API only; omitted from public share stats. */
+  server_id?: number;
   range: StatsRange;
   from_time: string;
   to_time: string;
-  sample_count: number;
   points: PlayerStatPoint[];
   current_players: number | null;
   peak_players: number | null;
   avg_players: number | null;
 };
 
-export type ButtonDraft = {
-  label: string;
-  command: string;
-  sort_order?: number;
+export type ChartShare = {
+  token: string;
+  url_path: string;
+  created_at: string;
+};
+
+export type PublicChartMeta = {
+  token: string;
+  server_name: string;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -226,6 +312,18 @@ export const api = {
   status: (id: number) => request<ServerStatus>(`/api/servers/${id}/status`),
   playerStats: (id: number, range: StatsRange = "24h") =>
     request<PlayerStats>(`/api/servers/${id}/player-stats?range=${range}`),
+
+  createChartShare: (id: number) =>
+    request<ChartShare>(`/api/servers/${id}/chart-share`, { method: "POST" }),
+  getChartShare: (id: number) => request<ChartShare>(`/api/servers/${id}/chart-share`),
+  deleteChartShare: (id: number) =>
+    request<void>(`/api/servers/${id}/chart-share`, { method: "DELETE" }),
+  publicChartMeta: (token: string) =>
+    request<PublicChartMeta>(`/api/public/charts/${encodeURIComponent(token)}/meta`),
+  publicChartStats: (token: string, range: StatsRange = "24h") =>
+    request<PlayerStats>(
+      `/api/public/charts/${encodeURIComponent(token)}/stats?range=${range}`
+    ),
   rcon: (id: number, command: string) =>
     request<RconResult>(`/api/servers/${id}/rcon`, {
       method: "POST",
@@ -236,26 +334,56 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
-  kick: (id: number, player_name: string, reason = "") =>
+  kick: (id: number, player_name: string, reason = "", net_id = "") =>
     request<RconResult>(`/api/servers/${id}/players/kick`, {
       method: "POST",
-      body: JSON.stringify({ player_name, reason }),
+      body: JSON.stringify({ player_name, reason, net_id }),
     }),
-  ban: (id: number, player_name: string, ban_minutes: number, reason = "") =>
+  ban: (
+    id: number,
+    player_name: string,
+    ban_minutes: number,
+    reason = "",
+    net_id = ""
+  ) =>
     request<RconResult>(`/api/servers/${id}/players/ban`, {
       method: "POST",
-      body: JSON.stringify({ player_name, ban_minutes, reason }),
+      body: JSON.stringify({ player_name, ban_minutes, reason, net_id }),
     }),
-  permban: (id: number, player_name: string, reason = "") =>
+  permban: (id: number, player_name: string, reason = "", net_id = "") =>
     request<RconResult>(`/api/servers/${id}/players/permban`, {
       method: "POST",
-      body: JSON.stringify({ player_name, reason }),
+      body: JSON.stringify({ player_name, reason, net_id }),
     }),
   unban: (id: number, net_id: string) =>
     request<RconResult>(`/api/servers/${id}/players/unban`, {
       method: "POST",
       body: JSON.stringify({ net_id }),
     }),
+  bans: (id: number, opts?: { refresh?: boolean; page?: number; page_size?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.refresh) params.set("refresh", "true");
+    if (opts?.page != null) params.set("page", String(opts.page));
+    if (opts?.page_size != null) params.set("page_size", String(opts.page_size));
+    const q = params.toString();
+    return request<BanList>(`/api/servers/${id}/bans${q ? `?${q}` : ""}`);
+  },
+
+  identityFlags: (identities: { platform?: string; external_id?: string; net_id?: string; steamid?: string }[]) =>
+    request<{ flags: Record<string, boolean> }>("/api/identities/flags", {
+      method: "POST",
+      body: JSON.stringify({ identities }),
+    }),
+  identityDossier: (platform: string, externalId: string) =>
+    request<IdentityDossier>(
+      `/api/identities/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}`
+    ),
+  /** Upsert the single admin note document (empty body clears). */
+  setIdentityNote: (platform: string, externalId: string, body: string) =>
+    request<PlayerNote | null>(
+      `/api/identities/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}/notes`,
+      { method: "PUT", body: JSON.stringify({ body }) }
+    ),
   travel: (
     id: number,
     body: {
@@ -289,25 +417,6 @@ export const api = {
         ? `/api/gamemode-labels?server_type=${encodeURIComponent(serverType)}`
         : "/api/gamemode-labels"
     ),
-  buttons: (serverType = "sandstorm") =>
-    request<CustomButton[]>(`/api/buttons?server_type=${encodeURIComponent(serverType)}`),
-  serverButtons: (serverId: number) =>
-    request<CustomButton[]>(`/api/servers/${serverId}/buttons`),
-  replaceServerButtons: (serverId: number, buttons: ButtonDraft[]) =>
-    request<CustomButton[]>(`/api/servers/${serverId}/buttons`, {
-      method: "PUT",
-      body: JSON.stringify({ buttons }),
-    }),
-  replaceTypeButtons: (serverType: string, buttons: ButtonDraft[]) =>
-    request<CustomButton[]>(`/api/buttons/type/${encodeURIComponent(serverType)}`, {
-      method: "PUT",
-      body: JSON.stringify({ buttons }),
-    }),
-  updateButton: (id: number, data: { label: string; command: string }) =>
-    request<CustomButton>(`/api/buttons/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
   settings: () => request<AppSettings>("/api/settings"),
   updateSettings: (data: Partial<AppSettings>) =>
     request<AppSettings>("/api/settings", {

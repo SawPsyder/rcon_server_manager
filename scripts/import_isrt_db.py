@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import servers/maps/buttons from an ISRT SQLite DB into SSM app.db."""
+"""Import servers/maps from an ISRT SQLite DB into app.db (quick buttons are hardcoded)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.config import get_settings  # noqa: E402
 from app.database import Base, SessionLocal, engine  # noqa: E402
-from app.models import CustomButton, MapConfig, Server  # noqa: E402
+from app.models import MapConfig, Server  # noqa: E402
 from app.security import encrypt_secret  # noqa: E402
 
 
@@ -117,30 +117,6 @@ def main() -> None:
                 )
             )
             print(f"imported map {map_name}")
-
-    # buttons from cust_buttons single row
-    try:
-        row = cur.execute(
-            "SELECT btn1_name, btn1_command, btn2_name, btn2_command, btn3_name, btn3_command FROM cust_buttons"
-        ).fetchone()
-        if row:
-            pairs = [
-                (row["btn1_name"], row["btn1_command"], 0),
-                (row["btn2_name"], row["btn2_command"], 1),
-                (row["btn3_name"], row["btn3_command"], 2),
-            ]
-            for label, command, order in pairs:
-                if not label or not command:
-                    continue
-                existing = db.query(CustomButton).filter(CustomButton.sort_order == order).first()
-                if existing:
-                    existing.label = label
-                    existing.command = command
-                else:
-                    db.add(CustomButton(label=label, command=command, sort_order=order))
-                print(f"imported button {label}")
-    except sqlite3.Error:
-        pass
 
     db.commit()
     db.close()

@@ -109,6 +109,51 @@ def run_migrations(engine: Engine) -> None:
                 )
             )
 
+    # player_count_samples: store roster at sample time for chart tooltips
+    if _table_exists(engine, "player_count_samples"):
+        if dialect == "postgresql":
+            _add_column(engine, "player_count_samples", "roster_json TEXT DEFAULT '[]'")
+        else:
+            _add_column(engine, "player_count_samples", "roster_json TEXT DEFAULT '[]'")
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE player_count_samples SET roster_json = '[]' "
+                    "WHERE roster_json IS NULL OR roster_json = ''"
+                )
+            )
+
+    # chart_shares: public cryptic chart share tokens
+    if not _table_exists(engine, "chart_shares"):
+        if dialect == "postgresql":
+            ddl = """
+            CREATE TABLE chart_shares (
+                id SERIAL PRIMARY KEY,
+                token VARCHAR(64) NOT NULL,
+                server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL,
+                CONSTRAINT uq_chart_share_server UNIQUE (server_id)
+            );
+            CREATE UNIQUE INDEX ix_chart_shares_token ON chart_shares (token);
+            """
+        else:
+            ddl = """
+            CREATE TABLE chart_shares (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                token VARCHAR(64) NOT NULL,
+                server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                created_at DATETIME NOT NULL,
+                CONSTRAINT uq_chart_share_server UNIQUE (server_id)
+            );
+            CREATE UNIQUE INDEX ix_chart_shares_token ON chart_shares (token);
+            """
+        with engine.begin() as conn:
+            for stmt in ddl.strip().split(";"):
+                s = stmt.strip()
+                if s:
+                    conn.execute(text(s))
+        logger.info("Created table chart_shares (%s)", dialect)
+
     # migrate legacy preferred_gamemode setting → type default key
     if _table_exists(engine, "settings"):
         with engine.begin() as conn:

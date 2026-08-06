@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     query_timeout: float = 2.0
     rcon_timeout: float = 5.0
 
+    # Optional Steam Web API key for persona name resolution
+    # https://steamcommunity.com/dev/apikey
+    # Accepts STEAM_WEB_API_KEY or STEAM_API_KEY
+    steam_web_api_key: str = ""
+    steam_api_key: str = ""  # alias
+    # How long a cached Steam persona is considered fresh for force-refresh (seconds)
+    identity_cache_ttl_seconds: int = 60 * 60 * 24 * 7  # 7 days
+
+    def resolved_steam_api_key(self) -> str:
+        return (self.steam_web_api_key or self.steam_api_key or "").strip()
+
     @property
     def resolved_database_url(self) -> str:
         if self.database_url:

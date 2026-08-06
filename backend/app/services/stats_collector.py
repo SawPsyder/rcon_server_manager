@@ -14,6 +14,7 @@ from app.server_types import DEFAULT_SERVER_TYPE
 from app.services.players import sample_player_count
 from app.services.presence import update_presence
 from app.services.query import query_server_status
+from app.services.roster import roster_from_player_list, roster_to_json
 from app.services.status_cache import update_server_status_cache
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,7 @@ class StatsCollector:
                         "Status cache refresh failed for server %s", server.id, exc_info=True
                     )
 
+                roster = roster_from_player_list(snap.get("player_list") or [])
                 db.add(
                     PlayerCountSample(
                         server_id=server.id,
@@ -149,6 +151,7 @@ class StatsCollector:
                         players=int(snap.get("players") or 0),
                         max_players=int(snap.get("max_players") or 0),
                         online=bool(snap.get("online")),
+                        roster_json=roster_to_json(roster),
                     )
                 )
 

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, maps, rcon, servers, settings, stats, status
+from app.api import auth, chart_share, identities, maps, rcon, servers, settings, stats, status
 from app.bootstrap import ensure_admin, seed_if_empty
 from app.database import Base, SessionLocal, engine, wait_for_database
 from app.migrate import run_migrations
@@ -25,9 +25,12 @@ app.include_router(auth.router)
 app.include_router(servers.router)
 app.include_router(status.router)
 app.include_router(stats.router)
+app.include_router(chart_share.admin_router)
+app.include_router(chart_share.public_router)
 app.include_router(rcon.router)
 app.include_router(maps.router)
 app.include_router(settings.router)
+app.include_router(identities.router)
 
 
 @app.on_event("startup")

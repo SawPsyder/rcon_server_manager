@@ -1,26 +1,28 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.servers import get_rcon_password, get_server_or_404, resolve_buttons
+from app.api.servers import get_rcon_password, get_server_or_404
 from app.config import get_settings
 from app.database import get_db
 from app.deps import require_admin
-from app.models import CommandHistory, CustomButton, MapConfig
+from app.models import CommandHistory, MapConfig
 from app.schemas import (
     AdminSayRequest,
+    BanEntryOut,
+    BanListOut,
     CommandHistoryOut,
-    CustomButtonOut,
-    CustomButtonUpdate,
     PlayerActionRequest,
     RconCommandRequest,
     RconCommandResponse,
     TravelPreview,
     TravelRequest,
-    TypeButtonsReplace,
     UnbanRequest,
 )
-from app.server_types import DEFAULT_SERVER_TYPE, get_adapter, is_known_type
-from app.server_types.sandstorm import build_travel_command, map_gamemodes
+from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
+from app.server_types.sandstorm import build_travel_command, map_gamemodes, parse_listbans
+from app.services.ban_cache import load_cached_bans, remove_cached_ban, replace_server_bans
+from app.services.identity import steam_api_configured
+from app.services.player_records import log_player_action
 from app.services.rcon import RconError, run_rcon
 
 router = APIRouter(tags=["rcon"])
@@ -70,6 +72,34 @@ def _exec(db: Session, server_id: int, command: str) -> RconCommandResponse:
         return RconCommandResponse(command=command, response="", ok=False, error=str(exc))
 
 
+def _log_moderation(
+    db: Session,
+    server,
+    *,
+    action: str,
+    result: RconCommandResponse,
+    player_name: str = "",
+    net_id: str = "",
+    reason: str = "",
+    detail: str = "",
+) -> None:
+    try:
+        log_player_action(
+            db,
+            server=server,
+            action=action,
+            net_id=net_id,
+            player_name=player_name,
+            reason=reason,
+            detail=detail,
+            ok=result.ok,
+            error=result.error or "",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 @router.post("/api/servers/{server_id}/rcon", response_model=RconCommandResponse)
 def rcon_command(
     server_id: int,
@@ -103,7 +133,17 @@ def kick_player(
     _require_feature(server, "kick_ban")
     reason = body.reason.strip() or "Kicked by admin"
     cmd = f'kick "{body.player_name}" "{reason}"'
-    return _exec(db, server_id, cmd)
+    result = _exec(db, server_id, cmd)
+    _log_moderation(
+        db,
+        server,
+        action="kick",
+        result=result,
+        player_name=body.player_name,
+        net_id=body.net_id,
+        reason=reason,
+    )
+    return result
 
 
 @router.post("/api/servers/{server_id}/players/ban", response_model=RconCommandResponse)
@@ -118,7 +158,18 @@ def ban_player(
     minutes = body.ban_minutes or 60
     reason = body.reason.strip() or "Banned by admin"
     cmd = f'ban "{body.player_name}" "{minutes}" "{reason}"'
-    return _exec(db, server_id, cmd)
+    result = _exec(db, server_id, cmd)
+    _log_moderation(
+        db,
+        server,
+        action="ban",
+        result=result,
+        player_name=body.player_name,
+        net_id=body.net_id,
+        reason=reason,
+        detail=f"{minutes} minutes",
+    )
+    return result
 
 
 @router.post("/api/servers/{server_id}/players/permban", response_model=RconCommandResponse)
@@ -132,7 +183,18 @@ def permban_player(
     _require_feature(server, "kick_ban")
     reason = body.reason.strip() or "Permanently banned by admin"
     cmd = f'permban "{body.player_name}" "{reason}"'
-    return _exec(db, server_id, cmd)
+    result = _exec(db, server_id, cmd)
+    _log_moderation(
+        db,
+        server,
+        action="permban",
+        result=result,
+        player_name=body.player_name,
+        net_id=body.net_id,
+        reason=reason,
+        detail="permanent",
+    )
+    return result
 
 
 @router.post("/api/servers/{server_id}/players/unban", response_model=RconCommandResponse)
@@ -144,7 +206,105 @@ def unban_player(
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
     _require_feature(server, "kick_ban")
-    return _exec(db, server_id, f'unban "{body.net_id.strip()}"')
+    net_id = body.net_id.strip()
+    result = _exec(db, server_id, f'unban "{net_id}"')
+    _log_moderation(
+        db,
+        server,
+        action="unban",
+        result=result,
+        net_id=net_id,
+        reason="",
+    )
+    if result.ok:
+        try:
+            remove_cached_ban(db, server_id, net_id)
+            db.commit()
+        except Exception:
+            db.rollback()
+    return result
+
+
+def _ban_list_out(server_id: int, cached: dict, *, from_cache: bool, ok: bool | None = None, error: str | None = None) -> BanListOut:
+    return BanListOut(
+        server_id=server_id,
+        bans=[BanEntryOut(**b) for b in cached.get("bans") or []],
+        raw=cached.get("raw") or "",
+        ok=bool(cached.get("ok", True)) if ok is None else ok,
+        error=error if error is not None else cached.get("error"),
+        steam_lookup_enabled=steam_api_configured(),
+        from_cache=from_cache,
+        fetched_at=cached.get("fetched_at"),
+        page=int(cached.get("page") or 1),
+        page_size=int(cached.get("page_size") or 25),
+        total=int(cached.get("total") or 0),
+        total_pages=int(cached.get("total_pages") or 1),
+    )
+
+
+@router.get("/api/servers/{server_id}/bans", response_model=BanListOut)
+def list_bans(
+    server_id: int,
+    refresh: bool = False,
+    page: int = 1,
+    page_size: int = 25,
+    db: Session = Depends(get_db),
+    _admin: str = Depends(require_admin),
+) -> BanListOut:
+    """
+    Return structured bans for a server (paginated).
+
+    Default: serve DB cache (instant). Use ?refresh=true to run live listbans
+    and replace the cache. Names are resolved via identity_cache / Steam API
+    for the current page only.
+    """
+    server = get_server_or_404(db, server_id)
+    _require_feature(server, "kick_ban")
+    page = max(1, page)
+    page_size = min(100, max(1, page_size))
+
+    if not refresh:
+        cached = load_cached_bans(db, server_id, page=page, page_size=page_size)
+        if cached.get("has_snapshot"):
+            return _ban_list_out(server_id, cached, from_cache=True)
+        # No cache yet — fall through to live fetch once
+
+    result = _exec(db, server_id, "listbans")
+    if not result.ok:
+        cached = load_cached_bans(db, server_id, page=page, page_size=page_size)
+        if cached.get("has_snapshot"):
+            return _ban_list_out(
+                server_id,
+                cached,
+                from_cache=True,
+                ok=False,
+                error=result.error or "listbans failed",
+            )
+        return BanListOut(
+            server_id=server_id,
+            bans=[],
+            raw="",
+            ok=False,
+            error=result.error or "listbans failed",
+            steam_lookup_enabled=steam_api_configured(),
+            from_cache=False,
+            fetched_at=None,
+            page=page,
+            page_size=page_size,
+            total=0,
+            total_pages=1,
+        )
+
+    raw = result.response or ""
+    parsed = parse_listbans(raw)
+    try:
+        replace_server_bans(db, server_id, parsed=parsed, raw=raw, ok=True, error="")
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    cached = load_cached_bans(db, server_id, page=page, page_size=page_size)
+    return _ban_list_out(server_id, cached, from_cache=False, ok=True, error=None)
 
 
 @router.post("/api/servers/{server_id}/travel", response_model=RconCommandResponse)
@@ -214,68 +374,3 @@ def command_history(
         .all()
     )
     return rows
-
-
-@router.get("/api/buttons", response_model=list[CustomButtonOut])
-def list_type_default_buttons(
-    server_type: str = DEFAULT_SERVER_TYPE,
-    db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
-) -> list[CustomButtonOut]:
-    """Type-default quick buttons (server_id is null)."""
-    st = server_type.strip().lower() or DEFAULT_SERVER_TYPE
-    if not is_known_type(st):
-        raise HTTPException(status_code=400, detail=f"Unknown server type: {server_type}")
-    return (
-        db.query(CustomButton)
-        .filter(CustomButton.server_type == st, CustomButton.server_id.is_(None))
-        .order_by(CustomButton.sort_order.asc())
-        .all()
-    )
-
-
-@router.put("/api/buttons/type/{server_type}", response_model=list[CustomButtonOut])
-def replace_type_buttons(
-    server_type: str,
-    body: TypeButtonsReplace,
-    db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
-) -> list[CustomButtonOut]:
-    st = server_type.strip().lower()
-    if not is_known_type(st):
-        raise HTTPException(status_code=400, detail=f"Unknown server type: {server_type}")
-    db.query(CustomButton).filter(
-        CustomButton.server_type == st, CustomButton.server_id.is_(None)
-    ).delete()
-    created: list[CustomButton] = []
-    for i, btn in enumerate(body.buttons):
-        row = CustomButton(
-            label=btn.label.strip(),
-            command=btn.command.strip(),
-            sort_order=btn.sort_order if btn.sort_order else i,
-            server_type=st,
-            server_id=None,
-        )
-        db.add(row)
-        created.append(row)
-    db.commit()
-    for row in created:
-        db.refresh(row)
-    return created
-
-
-@router.put("/api/buttons/{button_id}", response_model=CustomButtonOut)
-def update_button(
-    button_id: int,
-    body: CustomButtonUpdate,
-    db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
-) -> CustomButtonOut:
-    row = db.get(CustomButton, button_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Button not found")
-    row.label = body.label.strip()
-    row.command = body.command.strip()
-    db.commit()
-    db.refresh(row)
-    return row

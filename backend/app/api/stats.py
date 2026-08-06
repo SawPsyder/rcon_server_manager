@@ -5,13 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.servers import get_server_or_404
 from app.database import get_db
 from app.deps import require_admin
 from app.models import PlayerCountSample
+from app.services.roster import roster_from_json, roster_names
 
 router = APIRouter(prefix="/api/servers", tags=["stats"])
 
@@ -23,6 +24,8 @@ RANGE_DELTAS: dict[str, timedelta] = {
     "1y": timedelta(days=365),
 }
 
+VALID_RANGES = frozenset(RANGE_DELTAS.keys())
+
 # Soft cap on points returned to the chart (downsample if denser)
 MAX_CHART_POINTS = 480
 
@@ -32,6 +35,8 @@ class PlayerStatPoint(BaseModel):
     players: float
     max_players: float
     online: bool
+    # Names present at this sample (admin only; public omits)
+    player_names: list[str] = Field(default_factory=list)
 
 
 class PlayerStatsOut(BaseModel):
@@ -39,31 +44,60 @@ class PlayerStatsOut(BaseModel):
     range: str
     from_time: datetime
     to_time: datetime
-    sample_count: int
     points: list[PlayerStatPoint]
     current_players: int | None = None
     peak_players: int | None = None
     avg_players: float | None = None
 
 
+class PublicPlayerStatPoint(BaseModel):
+    """Count-only point for public share links (no roster / names)."""
+
+    t: datetime
+    players: float
+    max_players: float
+    online: bool
+
+
+class PublicPlayerStatsOut(BaseModel):
+    """Public share payload: counts only — no server_id, names, or sample_count."""
+
+    range: str
+    from_time: datetime
+    to_time: datetime
+    points: list[PublicPlayerStatPoint]
+    current_players: int | None = None
+    peak_players: int | None = None
+    avg_players: float | None = None
+
+
+def _point_from_row(r: PlayerCountSample, *, include_names: bool = True) -> PlayerStatPoint:
+    names = (
+        roster_names(roster_from_json(getattr(r, "roster_json", None)))
+        if include_names
+        else []
+    )
+    return PlayerStatPoint(
+        t=r.recorded_at,
+        players=float(r.players),
+        max_players=float(r.max_players),
+        online=bool(r.online),
+        player_names=names,
+    )
+
+
 def _downsample(
     rows: list[PlayerCountSample],
     max_points: int = MAX_CHART_POINTS,
+    *,
+    include_names: bool = True,
 ) -> list[PlayerStatPoint]:
     if not rows:
         return []
     if len(rows) <= max_points:
-        return [
-            PlayerStatPoint(
-                t=r.recorded_at,
-                players=float(r.players),
-                max_players=float(r.max_players),
-                online=bool(r.online),
-            )
-            for r in rows
-        ]
+        return [_point_from_row(r, include_names=include_names) for r in rows]
 
-    # Average into fixed buckets
+    # Pick a representative sample per bucket (mid) so roster matches the point
     bucket_count = max_points
     n = len(rows)
     out: list[PlayerStatPoint] = []
@@ -73,35 +107,24 @@ def _downsample(
         chunk = rows[start:end]
         if not chunk:
             continue
-        players_avg = sum(c.players for c in chunk) / len(chunk)
-        max_avg = sum(c.max_players for c in chunk) / len(chunk)
-        online = any(c.online for c in chunk)
-        # Use middle timestamp of bucket
-        mid = chunk[len(chunk) // 2].recorded_at
-        out.append(
-            PlayerStatPoint(
-                t=mid,
-                players=round(players_avg, 2),
-                max_players=round(max_avg, 2),
-                online=online,
-            )
-        )
+        mid = chunk[len(chunk) // 2]
+        out.append(_point_from_row(mid, include_names=include_names))
     return out
 
 
-@router.get("/{server_id}/player-stats", response_model=PlayerStatsOut)
-def player_stats(
+def build_player_stats(
+    db: Session,
     server_id: int,
-    range: str = Query(default="24h", pattern="^(24h|7d|30d|180d|1y)$"),
-    db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
+    range_key: str,
+    *,
+    include_names: bool = True,
 ) -> PlayerStatsOut:
-    get_server_or_404(db, server_id)
-    if range not in RANGE_DELTAS:
+    """Shared builder for admin and public chart endpoints."""
+    if range_key not in RANGE_DELTAS:
         raise HTTPException(status_code=400, detail="Invalid range")
 
     now = datetime.now(timezone.utc)
-    from_time = now - RANGE_DELTAS[range]
+    from_time = now - RANGE_DELTAS[range_key]
 
     rows = (
         db.query(PlayerCountSample)
@@ -114,7 +137,7 @@ def player_stats(
         .all()
     )
 
-    points = _downsample(rows)
+    points = _downsample(rows, include_names=include_names)
     online_rows = [r for r in rows if r.online]
     peak = max((r.players for r in online_rows), default=None)
     avg = (
@@ -126,12 +149,43 @@ def player_stats(
 
     return PlayerStatsOut(
         server_id=server_id,
-        range=range,
+        range=range_key,
         from_time=from_time,
         to_time=now,
-        sample_count=len(rows),
         points=points,
         current_players=current,
         peak_players=peak,
         avg_players=avg,
     )
+
+
+def to_public_stats(full: PlayerStatsOut) -> PublicPlayerStatsOut:
+    """Strip internal id, roster, and sample_count for public responses."""
+    return PublicPlayerStatsOut(
+        range=full.range,
+        from_time=full.from_time,
+        to_time=full.to_time,
+        points=[
+            PublicPlayerStatPoint(
+                t=p.t,
+                players=p.players,
+                max_players=p.max_players,
+                online=p.online,
+            )
+            for p in full.points
+        ],
+        current_players=full.current_players,
+        peak_players=full.peak_players,
+        avg_players=full.avg_players,
+    )
+
+
+@router.get("/{server_id}/player-stats", response_model=PlayerStatsOut)
+def player_stats(
+    server_id: int,
+    range: str = Query(default="24h", pattern="^(24h|7d|30d|180d|1y)$"),
+    db: Session = Depends(get_db),
+    _admin: str = Depends(require_admin),
+) -> PlayerStatsOut:
+    get_server_or_404(db, server_id)
+    return build_player_stats(db, server_id, range)

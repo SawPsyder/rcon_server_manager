@@ -68,8 +68,27 @@ class PlayerCountSample(Base):
     players: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_players: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     online: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # JSON list of {name, steamid?} present at sample time (empty string if unknown)
+    roster_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
     server: Mapped[Server] = relationship(back_populates="player_samples")
+
+
+class ChartShare(Base):
+    """Public unguessable share token for a server player-count chart."""
+
+    __tablename__ = "chart_shares"
+    __table_args__ = (
+        UniqueConstraint("server_id", name="uq_chart_share_server"),
+        Index("ix_chart_shares_token", "token", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    server: Mapped[Server] = relationship()
 
 
 class PlayerServerStats(Base):
@@ -180,3 +199,104 @@ class Setting(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     key: Mapped[str] = mapped_column(String(64), nullable=False)
     value: Mapped[str] = mapped_column(Text, default="")
+
+
+class IdentityCache(Base):
+    """Resolved platform usernames (Steam persona, etc.)."""
+
+    __tablename__ = "identity_cache"
+    __table_args__ = (
+        UniqueConstraint("platform", "external_id", name="uq_identity_platform_id"),
+        Index("ix_identity_external", "external_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # steam | steamnwi | eos | unknown
+    platform: Mapped[str] = mapped_column(String(32), nullable=False, default="steam")
+    # Canonical id (SteamID64 digits, or EOS product user id blob)
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    profile_url: Mapped[str] = mapped_column(String(512), default="")
+    avatar_url: Mapped[str] = mapped_column(String(512), default="")
+    # steam_api | presence | manual
+    source: Mapped[str] = mapped_column(String(32), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PlayerActionLog(Base):
+    """Kick / ban / permban / unban (and similar) history keyed by platform id."""
+
+    __tablename__ = "player_action_logs"
+    __table_args__ = (
+        Index("ix_player_actions_identity", "platform", "external_id"),
+        Index("ix_player_actions_server", "server_id"),
+        Index("ix_player_actions_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False, default="steam")
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    # kick | ban | permban | unban
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    server_id: Mapped[int | None] = mapped_column(
+        ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    server_name: Mapped[str] = mapped_column(String(255), default="")
+    player_name: Mapped[str] = mapped_column(String(255), default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    # e.g. ban duration minutes
+    detail: Mapped[str] = mapped_column(String(255), default="")
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PlayerAdminNote(Base):
+    """Admin free-text notes attached to a platform identity."""
+
+    __tablename__ = "player_admin_notes"
+    __table_args__ = (Index("ix_player_notes_identity", "platform", "external_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False, default="steam")
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ServerBanSnapshot(Base):
+    """Per-server cached listbans metadata (raw text + fetch time)."""
+
+    __tablename__ = "server_ban_snapshots"
+
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
+    raw_text: Mapped[str] = mapped_column(Text, default="")
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+
+
+class ServerBanEntry(Base):
+    """Cached ban rows for a server (from last successful listbans)."""
+
+    __tablename__ = "server_ban_entries"
+    __table_args__ = (
+        Index("ix_server_bans_server", "server_id"),
+        UniqueConstraint("server_id", "raw_id", name="uq_server_ban_raw"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
+    )
+    sort_index: Mapped[int] = mapped_column(Integer, default=0)
+    platform: Mapped[str] = mapped_column(String(64), default="")
+    raw_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    net_id: Mapped[str] = mapped_column(String(255), default="")
+    display_id: Mapped[str] = mapped_column(String(255), default="")
+    duration: Mapped[str] = mapped_column(String(128), default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    permanent: Mapped[bool] = mapped_column(Boolean, default=False)
