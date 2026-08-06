@@ -107,6 +107,25 @@ export type RconResult = {
   error?: string | null;
 };
 
+export type BanEntry = {
+  index: number;
+  platform: string;
+  raw_id: string;
+  net_id: string;
+  display_id: string;
+  duration: string;
+  reason: string;
+  permanent: boolean;
+};
+
+export type BanList = {
+  server_id: number;
+  bans: BanEntry[];
+  raw: string;
+  ok: boolean;
+  error?: string | null;
+};
+
 export type TypeSettings = {
   preferred_gamemode: string;
 };
@@ -247,6 +266,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ net_id }),
     }),
+  bans: (id: number) => request<BanList>(`/api/servers/${id}/bans`),
   travel: (
     id: number,
     body: {

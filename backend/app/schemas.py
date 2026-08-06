@@ -152,6 +152,25 @@ class UnbanRequest(BaseModel):
     net_id: str = Field(min_length=1)
 
 
+class BanEntryOut(BaseModel):
+    index: int
+    platform: str
+    raw_id: str
+    net_id: str
+    display_id: str
+    duration: str
+    reason: str
+    permanent: bool = False
+
+
+class BanListOut(BaseModel):
+    server_id: int
+    bans: list[BanEntryOut] = Field(default_factory=list)
+    raw: str = ""
+    ok: bool = True
+    error: str | None = None
+
+
 class AdminSayRequest(BaseModel):
     message: str = Field(min_length=1, max_length=500)
 

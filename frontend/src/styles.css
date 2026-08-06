@@ -273,6 +273,37 @@ textarea:focus {
   min-width: 180px;
 }
 
+.platform-pill {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  white-space: nowrap;
+}
+
+.platform-pill.steam {
+  border-color: rgba(61, 139, 253, 0.45);
+  color: #9ec5ff;
+}
+
+.platform-pill.eos {
+  border-color: rgba(232, 162, 58, 0.45);
+  color: #f0c57a;
+}
+
+.ban-permanent {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.ban-reason {
+  max-width: 28rem;
+  word-break: break-word;
+}
+
 .alert {
   border-radius: 10px;
   padding: 0.65rem 0.8rem;

@@ -8,6 +8,8 @@ from app.deps import require_admin
 from app.models import CommandHistory, MapConfig
 from app.schemas import (
     AdminSayRequest,
+    BanEntryOut,
+    BanListOut,
     CommandHistoryOut,
     PlayerActionRequest,
     RconCommandRequest,
@@ -17,7 +19,7 @@ from app.schemas import (
     UnbanRequest,
 )
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
-from app.server_types.sandstorm import build_travel_command, map_gamemodes
+from app.server_types.sandstorm import build_travel_command, map_gamemodes, parse_listbans
 from app.services.rcon import RconError, run_rcon
 
 router = APIRouter(tags=["rcon"])
@@ -142,6 +144,35 @@ def unban_player(
     server = get_server_or_404(db, server_id)
     _require_feature(server, "kick_ban")
     return _exec(db, server_id, f'unban "{body.net_id.strip()}"')
+
+
+@router.get("/api/servers/{server_id}/bans", response_model=BanListOut)
+def list_bans(
+    server_id: int,
+    db: Session = Depends(get_db),
+    _admin: str = Depends(require_admin),
+) -> BanListOut:
+    """Run RCON listbans and return structured rows for the UI."""
+    server = get_server_or_404(db, server_id)
+    _require_feature(server, "kick_ban")
+    result = _exec(db, server_id, "listbans")
+    if not result.ok:
+        return BanListOut(
+            server_id=server_id,
+            bans=[],
+            raw="",
+            ok=False,
+            error=result.error or "listbans failed",
+        )
+    raw = result.response or ""
+    parsed = parse_listbans(raw)
+    return BanListOut(
+        server_id=server_id,
+        bans=[BanEntryOut(**row) for row in parsed],
+        raw=raw,
+        ok=True,
+        error=None,
+    )
 
 
 @router.post("/api/servers/{server_id}/travel", response_model=RconCommandResponse)

@@ -3,12 +3,14 @@ import { Link } from "react-router-dom";
 import {
   api,
   AppSettings,
+  BanEntry,
   MapConfig,
   QuickButton,
   Server,
   ServerStatus,
   ServerTypeInfo,
 } from "../api";
+import BanListPanel from "../components/BanListPanel";
 import PlayerStatsChart from "../components/PlayerStatsChart";
 
 const SELECTED_KEY = "rsm_selected_server";
@@ -47,6 +49,11 @@ export default function DashboardPage() {
   const [selectedPlayer, setSelectedPlayer] = useState<string>("");
   const [sayMsg, setSayMsg] = useState("");
   const [unbanId, setUnbanId] = useState("");
+  const [bans, setBans] = useState<BanEntry[]>([]);
+  const [bansRaw, setBansRaw] = useState("");
+  const [bansError, setBansError] = useState("");
+  const [bansLoading, setBansLoading] = useState(false);
+  const [showBansRaw, setShowBansRaw] = useState(false);
 
   const [mapId, setMapId] = useState<number | "">("");
   const [gamemode, setGamemode] = useState("");
@@ -214,13 +221,88 @@ export default function DashboardPage() {
     setOutput(`[${title}] ${res.command}\n\n${body}`);
   };
 
+  const loadBans = useCallback(async () => {
+    if (!serverId) return;
+    setBansLoading(true);
+    setBansError("");
+    try {
+      const res = await api.bans(serverId);
+      if (!res.ok) {
+        setBans([]);
+        setBansRaw(res.raw || "");
+        setBansError(res.error || "Failed to load bans");
+      } else {
+        setBans(res.bans || []);
+        setBansRaw(res.raw || "");
+        setBansError(
+          (res.bans || []).length === 0 && res.raw
+            ? "Response received but no ban rows could be parsed — try Show raw."
+            : ""
+        );
+      }
+    } catch (e) {
+      setBans([]);
+      setBansError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBansLoading(false);
+    }
+  }, [serverId]);
+
   const runRcon = async (command: string, title = "RCON") => {
+    if (!serverId) return;
+    const cmd = command.trim();
+    // Structured ban UI for listbans shortcut / manual command
+    if (cmd.toLowerCase() === "listbans" || title === "List Bans") {
+      setBusy(true);
+      try {
+        const res = await api.bans(serverId);
+        if (!res.ok) {
+          setBans([]);
+          setBansRaw(res.raw || "");
+          setBansError(res.error || "Failed to load bans");
+          setOutput(`[List Bans] listbans\n\n${res.error || "failed"}`);
+        } else {
+          setBans(res.bans || []);
+          setBansRaw(res.raw || "");
+          setBansError(
+            (res.bans || []).length === 0 && res.raw
+              ? "Response received but no ban rows could be parsed — try Show raw."
+              : ""
+          );
+          setOutput(
+            `[List Bans] listbans\n\nParsed ${(res.bans || []).length} ban(s). See table below.`
+          );
+        }
+      } catch (e) {
+        setBansError(e instanceof Error ? e.message : String(e));
+        setOutput(String(e));
+      } finally {
+        setBusy(false);
+        setBansLoading(false);
+      }
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api.rcon(serverId, cmd);
+      showResult(title, res);
+      await refreshStatus();
+    } catch (e) {
+      setOutput(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unbanPlayer = async (netId: string) => {
     if (!serverId) return;
     setBusy(true);
     try {
-      const res = await api.rcon(serverId, command);
-      showResult(title, res);
-      await refreshStatus();
+      const res = await api.unban(serverId, netId);
+      showResult("Unban", res);
+      if (res.ok) {
+        await loadBans();
+      }
     } catch (e) {
       setOutput(String(e));
     } finally {
@@ -444,21 +526,14 @@ export default function DashboardPage() {
             </div>
             <div className="row wrap" style={{ marginTop: "0.75rem" }}>
               <input
-                placeholder="Steam NetID to unban"
+                placeholder="Manual unban: Steam / SteamNWI:… / EOS:…"
                 value={unbanId}
                 onChange={(e) => setUnbanId(e.target.value)}
               />
               <button
                 className="btn"
                 disabled={!unbanId || busy || !serverId}
-                onClick={() => {
-                  if (!serverId) return;
-                  setBusy(true);
-                  api
-                    .unban(serverId, unbanId)
-                    .then((r) => showResult("Unban", r))
-                    .finally(() => setBusy(false));
-                }}
+                onClick={() => unbanPlayer(unbanId.trim())}
               >
                 Unban
               </button>
@@ -466,6 +541,20 @@ export default function DashboardPage() {
           </>
         )}
       </section>
+
+      {features.kick_ban && (
+        <BanListPanel
+          bans={bans}
+          loading={bansLoading}
+          error={bansError}
+          busy={busy}
+          onRefresh={loadBans}
+          onUnban={unbanPlayer}
+          raw={bansRaw}
+          showRaw={showBansRaw}
+          onToggleRaw={() => setShowBansRaw((v) => !v)}
+        />
+      )}
 
       {features.map_travel && (
         <section className="card">
