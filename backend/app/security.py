@@ -41,6 +41,39 @@ def load_session_token(token: str) -> str | None:
         return None
 
 
+def _is_valid_fernet_key(key: bytes) -> bool:
+    """Fernet keys must be 32 url-safe base64-encoded bytes."""
+    try:
+        Fernet(key)
+        return True
+    except (ValueError, TypeError, Exception):  # noqa: BLE001
+        return False
+
+
+def _coerce_fernet_key(key_str: str) -> bytes | None:
+    """
+    Accept a Fernet key string. Invalid values are rejected (with a log),
+    so a bad ENCRYPTION_KEY env does not crash encrypt/decrypt.
+    """
+    key_str = (key_str or "").strip().strip('"').strip("'")
+    if not key_str:
+        return None
+    raw = key_str.encode("utf-8")
+    if _is_valid_fernet_key(raw):
+        return raw
+    # Common mistake: user put a random password. Derive a stable Fernet key
+    # from it so deployments still work (document proper generate_key in README).
+    derived = base64.urlsafe_b64encode(hashlib.sha256(raw).digest())
+    if _is_valid_fernet_key(derived):
+        logger.warning(
+            "ENCRYPTION_KEY is not a Fernet key (expected output of "
+            "Fernet.generate_key()). Deriving a key via SHA-256; re-save "
+            "RCON passwords if you later switch to a proper Fernet key."
+        )
+        return derived
+    return None
+
+
 def _fernet_candidates() -> list[bytes]:
     """
     Build possible Fernet keys (current + legacy) so restarts / env changes
@@ -50,12 +83,9 @@ def _fernet_candidates() -> list[bytes]:
     keys: list[bytes] = []
 
     def _add(key_str: str) -> None:
-        key_str = key_str.strip()
-        if not key_str:
-            return
-        raw = key_str.encode("utf-8")
-        if raw not in keys:
-            keys.append(raw)
+        key = _coerce_fernet_key(key_str)
+        if key is not None and key not in keys:
+            keys.append(key)
 
     # 1) Explicit env key
     if settings.encryption_key.strip():
@@ -65,21 +95,30 @@ def _fernet_candidates() -> list[bytes]:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     key_path = Path(settings.data_dir) / ".encryption_key"
     if key_path.is_file():
-        _add(key_path.read_text(encoding="utf-8"))
+        try:
+            _add(key_path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            logger.warning("Could not read encryption key file: %s", exc)
     else:
-        # Create once if no env key configured
-        if not settings.encryption_key.strip():
+        # Create once if we still have no usable key from env
+        if not keys:
             generated = Fernet.generate_key().decode("ascii")
-            key_path.write_text(generated, encoding="utf-8")
             try:
-                key_path.chmod(0o600)
-            except OSError:
-                pass
-            _add(generated)
+                key_path.write_text(generated, encoding="utf-8")
+                try:
+                    key_path.chmod(0o600)
+                except OSError:
+                    pass
+                _add(generated)
+                logger.info("Generated new Fernet key at %s", key_path)
+            except OSError as exc:
+                logger.warning("Could not write encryption key file: %s", exc)
 
-    # 3) Legacy derive-from-SECRET_KEY (older builds)
+    # 3) Legacy derive-from-SECRET_KEY (older builds) — always valid
     digest = hashlib.sha256(settings.secret_key.encode("utf-8")).digest()
-    _add(base64.urlsafe_b64encode(digest).decode("ascii"))
+    legacy = base64.urlsafe_b64encode(digest)
+    if legacy not in keys:
+        keys.append(legacy)
 
     return keys
 
@@ -87,7 +126,8 @@ def _fernet_candidates() -> list[bytes]:
 def _fernet() -> Fernet:
     candidates = _fernet_candidates()
     if not candidates:
-        # Absolute fallback
+        # Absolute fallback (ephemeral — avoid if possible)
+        logger.error("No Fernet key material available; using ephemeral key")
         return Fernet(Fernet.generate_key())
     return Fernet(candidates[0])
 
@@ -95,7 +135,15 @@ def _fernet() -> Fernet:
 def encrypt_secret(plaintext: str) -> str:
     if plaintext == "":
         return ""
-    return _fernet().encrypt(plaintext.encode("utf-8")).decode("utf-8")
+    try:
+        return _fernet().encrypt(plaintext.encode("utf-8")).decode("utf-8")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("encrypt_secret failed")
+        raise RuntimeError(
+            "Failed to encrypt RCON password. Set ENCRYPTION_KEY to a valid Fernet key "
+            '(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") '
+            "or leave it empty to auto-generate under DATA_DIR."
+        ) from exc
 
 
 def decrypt_secret(ciphertext: str) -> str:
