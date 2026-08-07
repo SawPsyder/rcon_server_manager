@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "vite build && node -e \"const fs=require('fs');const p=require('path');const src='dist';const dst=p.join('..','backend','app','static');fs.rmSync(dst,{recursive:true,force:true});fs.cpSync(src,dst,{recursive:true});console.log('copied dist -> backend/app/static')\"",
     "preview": "vite preview"
   },

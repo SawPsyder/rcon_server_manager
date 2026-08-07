@@ -209,6 +209,37 @@ def run_migrations(engine: Engine) -> None:
                     conn.execute(text(s))
         logger.info("Created table chart_shares (%s)", dialect)
 
+    # map_shares: public cryptic Palworld world-map share tokens
+    if not _table_exists(engine, "map_shares"):
+        if dialect == "postgresql":
+            ddl = """
+            CREATE TABLE map_shares (
+                id SERIAL PRIMARY KEY,
+                token VARCHAR(64) NOT NULL,
+                server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL,
+                CONSTRAINT uq_map_share_server UNIQUE (server_id)
+            );
+            CREATE UNIQUE INDEX ix_map_shares_token ON map_shares (token);
+            """
+        else:
+            ddl = """
+            CREATE TABLE map_shares (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                token VARCHAR(64) NOT NULL,
+                server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                created_at DATETIME NOT NULL,
+                CONSTRAINT uq_map_share_server UNIQUE (server_id)
+            );
+            CREATE UNIQUE INDEX ix_map_shares_token ON map_shares (token);
+            """
+        with engine.begin() as conn:
+            for stmt in ddl.strip().split(";"):
+                s = stmt.strip()
+                if s:
+                    conn.execute(text(s))
+        logger.info("Created table map_shares (%s)", dialect)
+
     # What was actually sent to the server. Needed to undo a ban on a platform
     # whose canonical identity drops the prefix (gdk_/xsx_ → xbox).
     if _table_exists(engine, "player_action_logs"):

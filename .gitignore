@@ -50,3 +50,8 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Local probe / scratch (never commit)
+scripts/_probe_*
+scripts/_cj.txt
+scripts/_probe_out/

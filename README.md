@@ -21,6 +21,7 @@ A self-hosted **web admin dashboard** for managing game servers from one place.
 - Multi-server overview
 - Encrypted server credentials at rest
 - Optional Steam persona name lookup
+- Palworld interactive world map with share links and permanent-only bans
 <!-- FEATURES:END -->
 
 Game-specific admin tools (player control, map travel, saves, etc.) depend on the server type - see below.
@@ -57,7 +58,7 @@ Connects via the dedicated server **REST API** (default port `8212`) - not RCON,
 - Player-count and **server FPS** history
 - Kick, ban, and unban (bans are permanent - the API takes no duration)
 - Admin broadcast messages
-- Admin panel: per-player detail, read-only settings, world snapshot, save, graceful shutdown, force stop
+- Admin panel: interactive Palpagos world map (player + base camp markers), read-only settings, world snapshot, save, graceful shutdown, force stop
 - Player history and playtime tracking, including crossplay (Steam, Xbox / Game Pass, PlayStation)
 
 Enable the API in `PalWorldSettings.ini` (there is no launch argument for it) and restart the server:
@@ -68,7 +69,7 @@ RESTAPIEnabled=True,RESTAPIPort=8212,AdminPassword="your-password"
 
 Two optional extras:
 
-- The **World** tab needs the server launched with `-enable-gamedata-api`; without it the tab explains how to turn it on.
+- The **World** tab (live map, actor snapshot) needs the server launched with `-enable-gamedata-api`; without it the tab explains how to turn it on.
 - Palworld serves **plain HTTP** and has no TLS of its own. Pocketpair warns these endpoints "are not designed to be exposed directly to the Internet" - keep port `8212` firewalled to trusted hosts. If you front it with a TLS-terminating reverse proxy, tick **Use HTTPS** on the server and optionally pin its certificate fingerprint.
 
 No ban list is shown for Palworld: the REST API has no endpoint for it, and bans live in `banlist.txt` on the server's disk.

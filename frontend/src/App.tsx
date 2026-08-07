@@ -6,7 +6,9 @@ import OverviewPage from "./pages/OverviewPage";
 import ServerDetailPage from "./pages/ServerDetailPage";
 import ServersPage from "./pages/ServersPage";
 import SettingsPage from "./pages/SettingsPage";
+import ServerMapPage from "./pages/ServerMapPage";
 import SharedChartPage from "./pages/SharedChartPage";
+import SharedMapPage from "./pages/SharedMapPage";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { loading, authenticated } = useAuth();
@@ -28,6 +30,16 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       {/* Public share - no session required */}
       <Route path="/share/c/:token" element={<SharedChartPage />} />
+      <Route path="/share/m/:token" element={<SharedMapPage />} />
+      {/* Admin full-page map (same tab; “← Server” to return) */}
+      <Route
+        path="/server/:serverId/map"
+        element={
+          <Protected>
+            <ServerMapPage />
+          </Protected>
+        }
+      />
       <Route
         path="/"
         element={

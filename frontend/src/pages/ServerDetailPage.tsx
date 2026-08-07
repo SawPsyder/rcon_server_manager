@@ -149,6 +149,7 @@ export default function ServerDetailPage() {
       structured_player_list: false,
       player_score: true,
       kick_ban: false,
+      timed_ban: false,
       ban_list: false,
       admin_say: false,
       a2s_query: true,
@@ -715,26 +716,28 @@ export default function ServerDetailPage() {
               >
                 Kick
               </button>
-              <button
-                className="btn"
-                disabled={!selectedPlayer || busy || !validServerId}
-                onClick={() => {
-                  const minutes = Number(prompt("Ban minutes", "60") || "60");
-                  const reason = prompt("Ban reason", "Banned by admin") || "";
-                  if (!validServerId || !selectedPlayer) return;
-                  setBusy(true);
-                  api
-                    .ban(validServerId, selectedPlayer, minutes, reason, selectedNetId)
-                    .then((r) => {
-                      showResult("Ban", r);
-                      refreshStatus();
-                      if (selectedNetId) refreshIdentityFlags([selectedNetId]);
-                    })
-                    .finally(() => setBusy(false));
-                }}
-              >
-                Ban
-              </button>
+              {features.timed_ban && (
+                <button
+                  className="btn"
+                  disabled={!selectedPlayer || busy || !validServerId}
+                  onClick={() => {
+                    const minutes = Number(prompt("Ban minutes", "60") || "60");
+                    const reason = prompt("Ban reason", "Banned by admin") || "";
+                    if (!validServerId || !selectedPlayer) return;
+                    setBusy(true);
+                    api
+                      .ban(validServerId, selectedPlayer, minutes, reason, selectedNetId)
+                      .then((r) => {
+                        showResult("Ban", r);
+                        refreshStatus();
+                        if (selectedNetId) refreshIdentityFlags([selectedNetId]);
+                      })
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  Ban
+                </button>
+              )}
               <button
                 className="btn danger"
                 disabled={!selectedPlayer || busy || !validServerId}

@@ -174,6 +174,8 @@ def test_registered_with_expected_capabilities():
     # Unlike Satisfactory, /v1/api/players gives a real roster
     assert info.features.structured_player_list is True
     assert info.features.kick_ban is True
+    # /v1/api/ban has no duration — only permanent bans (Permaban in the UI)
+    assert info.features.timed_ban is False
     assert info.features.admin_say is True
     # There is no ban-list endpoint (bans live in banlist.txt on the host), so
     # the list is shown but sourced from our own moderation history
@@ -592,6 +594,8 @@ def test_game_data_summary_links_pals_to_their_owner():
         "Time": "2026-08-07 12:00:00",
         "FPS": 61.0,
         "AverageFPS": 57.5,
+        "InGameTime": "03:50",
+        "InGameDays": 12,
         "ActorData": [
             {
                 "Type": "Character",
@@ -603,31 +607,65 @@ def test_game_data_summary_links_pals_to_their_owner():
                 "HP": 500,
                 "MaxHP": 900,
                 "GuildName": "Lyra's Guild",
+                "GuildID": "G1",
                 "LocationX": 1.0,
                 "LocationY": 2.0,
                 "LocationZ": 3.0,
+                "RotationZ": 90.0,
             },
             {
                 "Type": "Character",
+                "InstanceID": "OTOMO1",
                 "UnitType": "OtomoPal",
+                "NickName": "Lamball",
+                "Class": "BP_SheepBall_C",
                 "TrainerInstanceID": "OWNER1",
-                "LocationX": 0.0,
-                "LocationY": 0.0,
+                "LocationX": 1.5,
+                "LocationY": 2.5,
+                "LocationZ": 0.0,
+                "RotationZ": 10.0,
+            },
+            {
+                "Type": "Character",
+                "InstanceID": "WORKER1",
+                "UnitType": "BaseCampPal",
+                "NickName": "Anubis",
+                "Class": "BP_Anubis_C",
+                "TrainerInstanceID": "OWNER1",
+                "GuildName": "Lyra's Guild",
+                "GuildID": "G1",
+                "level": 40,
+                "LocationX": 4.0,
+                "LocationY": 5.0,
+                "LocationZ": 0.0,
+                "AI_Action": "BP_AIAction_Worker_Working",
+            },
+            {
+                "Type": "Character",
+                "InstanceID": "WILD1",
+                "UnitType": "WildPal",
+                "NickName": "Cattiva",
+                "Class": "BP_PinkCat_C",
+                "level": 3,
+                "LocationX": 10.0,
+                "LocationY": 11.0,
                 "LocationZ": 0.0,
             },
             {
                 "Type": "Character",
-                "UnitType": "BaseCampPal",
-                "TrainerInstanceID": "OWNER1",
-                "LocationX": 0.0,
-                "LocationY": 0.0,
+                "InstanceID": "NPC1",
+                "UnitType": "NPC",
+                "NickName": "Scouting Party Survivor",
+                "level": 22,
+                "LocationX": 20.0,
+                "LocationY": 21.0,
                 "LocationZ": 0.0,
             },
-            {"Type": "Character", "UnitType": "WildPal"},
             {
                 "Type": "PalBox",
                 "GuildID": "G1",
                 "GuildName": "Lyra's Guild",
+                "Name": "Base A",
                 "LocationX": 9.0,
                 "LocationY": 8.0,
                 "LocationZ": 7.0,
@@ -639,8 +677,10 @@ def test_game_data_summary_links_pals_to_their_owner():
     # Not ISO 8601 - passed through as the server wrote it
     assert out.snapshot_time == "2026-08-07 12:00:00"
     assert out.fps == pytest.approx(61.0)
+    assert out.in_game_time == "03:50" and out.in_game_days == 12
     assert out.actor_counts == {
         "BaseCampPal": 1,
+        "NPC": 1,
         "OtomoPal": 1,
         "PalBox": 1,
         "Player": 1,
@@ -652,10 +692,19 @@ def test_game_data_summary_links_pals_to_their_owner():
     # game-data spells it lowercase, unlike /players' userId
     assert player.user_id == "steam_76561198084350159"
     assert player.pal_count == 2
+    assert player.rotation_z == pytest.approx(90.0)
+    assert player.guild_id == "G1"
     assert len(out.base_camps) == 1 and out.base_camps[0].guild_id == "G1"
+    assert out.base_camps[0].name == "Base A"
+    assert len(out.workers) == 1 and out.workers[0].species == "Anubis"
+    assert "Worker" in out.workers[0].activity or "Working" in out.workers[0].activity
+    assert len(out.wild_pals) == 1 and out.wild_pals[0].species == "Cattiva"
+    assert len(out.npcs) == 1 and "Survivor" in out.npcs[0].name
+    assert len(out.otomo_pals) == 1 and out.otomo_pals[0].species == "Lamball"
 
 
 def test_game_data_summary_tolerates_junk():
     out = summarize_game_data({"ActorData": ["not a dict", None, {}]})
     assert out.players == [] and out.base_camps == []
+    assert out.workers == [] and out.wild_pals == [] and out.npcs == []
     assert out.fps is None

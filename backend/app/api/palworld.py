@@ -29,6 +29,7 @@ from app.schemas import (
     PalworldActionOut,
     PalworldBaseCampOut,
     PalworldInfoOut,
+    PalworldMapEntity,
     PalworldMetricsOut,
     PalworldPlayerOut,
     PalworldPlayersOut,
@@ -189,13 +190,113 @@ def _actor_int(actor: Mapping[str, Any], key: str) -> int | None:
     return None if value is None else int(value)
 
 
+def _payload_pick(payload: Mapping[str, Any], *names: str) -> Any:
+    """Case-insensitive lookup for top-level game-data fields."""
+    lower = {str(k).lower(): v for k, v in payload.items()}
+    for name in names:
+        if name.lower() in lower:
+            return lower[name.lower()]
+    return None
+
+
+def _humanize_class(class_name: str) -> str:
+    """BP_SheepBall_C → SheepBall; empty when nothing useful remains."""
+    text = (class_name or "").strip()
+    if not text:
+        return ""
+    if text.startswith("BP_"):
+        text = text[3:]
+    for suffix in ("_C", "_v03", "_v02", "_v01"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
+    # Drop long builder prefixes for structure-like classes
+    for prefix in ("BuildObject_", "NPC_Female_", "NPC_Male_", "Player_"):
+        if text.startswith(prefix):
+            text = text[len(prefix) :]
+    return text.replace("_", " ").strip()
+
+
+def _species_label(actor: Mapping[str, Any]) -> str:
+    """Prefer a readable NickName; fall back to humanized blueprint Class."""
+    nick = _actor_str(actor, "NickName")
+    klass = _humanize_class(_actor_str(actor, "Class"))
+    if nick and nick.upper() not in {"BASE", "NONE"}:
+        return nick
+    return klass or nick
+
+
+def _activity_label(actor: Mapping[str, Any]) -> str:
+    """Shorten BP_AIAction_Worker_Working → Worker Working."""
+    raw = _actor_str(actor, "AI_Action") or _actor_str(actor, "Action")
+    if not raw:
+        return ""
+    text = raw
+    for prefix in ("BP_AIAction_", "BP_Action_", "BP_"):
+        if text.startswith(prefix):
+            text = text[len(prefix) :]
+    if text.endswith("_C"):
+        text = text[:-2]
+    return text.replace("_", " ").strip()
+
+
+def _stable_actor_id(actor: Mapping[str, Any], prefix: str, index: int) -> str:
+    instance = _actor_str(actor, "InstanceID")
+    if instance:
+        # InstanceIDs can contain spaces/colons; keep them but namespace the layer
+        return f"{prefix}:{instance}"
+    gx = _actor_num(actor, "LocationX")
+    gy = _actor_num(actor, "LocationY")
+    return f"{prefix}:{index}:{gx}:{gy}"
+
+
+def _map_entity(actor: Mapping[str, Any], *, prefix: str, index: int) -> PalworldMapEntity:
+    species = _species_label(actor)
+    name = _actor_str(actor, "NickName") or species
+    return PalworldMapEntity(
+        id=_stable_actor_id(actor, prefix, index),
+        name=name,
+        species=species,
+        level=_actor_int(actor, "level"),
+        hp=_actor_int(actor, "HP"),
+        max_hp=_actor_int(actor, "MaxHP"),
+        guild_name=_actor_str(actor, "GuildName"),
+        guild_id=_actor_str(actor, "GuildID"),
+        location_x=_actor_num(actor, "LocationX"),
+        location_y=_actor_num(actor, "LocationY"),
+        location_z=_actor_num(actor, "LocationZ"),
+        rotation_z=_actor_num(actor, "RotationZ"),
+        activity=_activity_label(actor),
+    )
+
+
+# Soft caps so a 10k-actor public dump cannot flood the admin browser.
+_CAP_WORKERS = 800
+_CAP_WILD = 500
+_CAP_NPCS = 200
+_CAP_OTOMO = 200
+
+
+def _cap(entities: list[PalworldMapEntity], limit: int) -> list[PalworldMapEntity]:
+    if len(entities) <= limit:
+        return entities
+    # Prefer higher level / closer-to-origin for determinism
+    entities.sort(
+        key=lambda e: (
+            -(e.level or 0),
+            abs(e.location_x or 0) + abs(e.location_y or 0),
+            e.id,
+        )
+    )
+    return entities[:limit]
+
+
 def summarize_game_data(payload: Mapping[str, Any]) -> PalworldWorldOut:
     """Reduce the actor dump to something a browser can hold.
 
     ``/v1/api/game-data`` returns every actor in the world - players, their
     Pals, wild Pals, NPCs and base camps - which on a busy server is megabytes.
-    The panel only needs per-player detail plus counts, so the reduction happens
-    here and the raw payload never leaves the backend.
+    The map needs positioned entities plus counts; reduction happens here so the
+    raw dump never leaves the backend.
     """
     actors = payload.get("ActorData")
     actors = actors if isinstance(actors, list) else []
@@ -203,9 +304,14 @@ def summarize_game_data(payload: Mapping[str, Any]) -> PalworldWorldOut:
     counts: dict[str, int] = {}
     players: list[PalworldWorldPlayer] = []
     camps: list[PalworldBaseCampOut] = []
+    workers: list[PalworldMapEntity] = []
+    wild_pals: list[PalworldMapEntity] = []
+    npcs: list[PalworldMapEntity] = []
+    otomo: list[PalworldMapEntity] = []
     # Pals are linked to their owner by the owner's InstanceID
     pals_by_trainer: dict[str, int] = {}
     players_by_instance: dict[str, PalworldWorldPlayer] = {}
+    camp_i = worker_i = wild_i = npc_i = otomo_i = 0
 
     for actor in actors:
         if not isinstance(actor, Mapping):
@@ -214,15 +320,19 @@ def summarize_game_data(payload: Mapping[str, Any]) -> PalworldWorldOut:
 
         if kind == "PalBox":
             counts["PalBox"] = counts.get("PalBox", 0) + 1
+            gid = _actor_str(actor, "GuildID")
             camps.append(
                 PalworldBaseCampOut(
+                    id=f"camp:{gid or camp_i}:{camp_i}",
                     guild_name=_actor_str(actor, "GuildName"),
-                    guild_id=_actor_str(actor, "GuildID"),
+                    guild_id=gid,
+                    name=_actor_str(actor, "Name"),
                     location_x=_actor_num(actor, "LocationX"),
                     location_y=_actor_num(actor, "LocationY"),
                     location_z=_actor_num(actor, "LocationZ"),
                 )
             )
+            camp_i += 1
             continue
 
         unit = _actor_str(actor, "UnitType") or kind or "Unknown"
@@ -233,6 +343,7 @@ def summarize_game_data(payload: Mapping[str, Any]) -> PalworldWorldOut:
             pals_by_trainer[trainer] = pals_by_trainer.get(trainer, 0) + 1
 
         if unit == "Player":
+            instance = _actor_str(actor, "InstanceID")
             entry = PalworldWorldPlayer(
                 name=_actor_str(actor, "NickName"),
                 # game-data spells it lowercase, unlike /players' userId
@@ -241,14 +352,29 @@ def summarize_game_data(payload: Mapping[str, Any]) -> PalworldWorldOut:
                 hp=_actor_int(actor, "HP"),
                 max_hp=_actor_int(actor, "MaxHP"),
                 guild_name=_actor_str(actor, "GuildName"),
+                guild_id=_actor_str(actor, "GuildID"),
                 location_x=_actor_num(actor, "LocationX"),
                 location_y=_actor_num(actor, "LocationY"),
                 location_z=_actor_num(actor, "LocationZ"),
+                rotation_z=_actor_num(actor, "RotationZ"),
             )
             players.append(entry)
-            instance = _actor_str(actor, "InstanceID")
             if instance:
                 players_by_instance[instance] = entry
+            continue
+
+        if unit == "BaseCampPal":
+            workers.append(_map_entity(actor, prefix="worker", index=worker_i))
+            worker_i += 1
+        elif unit == "WildPal":
+            wild_pals.append(_map_entity(actor, prefix="wild", index=wild_i))
+            wild_i += 1
+        elif unit == "NPC":
+            npcs.append(_map_entity(actor, prefix="npc", index=npc_i))
+            npc_i += 1
+        elif unit == "OtomoPal":
+            otomo.append(_map_entity(actor, prefix="otomo", index=otomo_i))
+            otomo_i += 1
 
     for instance, count in pals_by_trainer.items():
         owner = players_by_instance.get(instance)
@@ -256,16 +382,44 @@ def summarize_game_data(payload: Mapping[str, Any]) -> PalworldWorldOut:
             owner.pal_count = count
 
     players.sort(key=lambda p: p.name.lower())
-    camps.sort(key=lambda c: (c.guild_name.lower(), c.guild_id))
+    camps.sort(key=lambda c: (c.guild_name.lower(), c.guild_id, c.id))
+    workers = _cap(workers, _CAP_WORKERS)
+    wild_pals = _cap(wild_pals, _CAP_WILD)
+    npcs = _cap(npcs, _CAP_NPCS)
+    otomo = _cap(otomo, _CAP_OTOMO)
+    workers.sort(key=lambda e: (e.guild_name.lower(), e.name.lower(), e.id))
+    wild_pals.sort(key=lambda e: (e.species.lower(), e.name.lower(), e.id))
+    npcs.sort(key=lambda e: (e.name.lower(), e.id))
+    otomo.sort(key=lambda e: (e.name.lower(), e.id))
+
+    days_raw = _payload_pick(payload, "InGameDays", "Days", "days")
+    try:
+        in_game_days = int(days_raw) if days_raw is not None and days_raw != "" else None
+    except (TypeError, ValueError):
+        in_game_days = None
+    in_game_time = str(_payload_pick(payload, "InGameTime", "GameTime") or "").strip()
+
+    def _float_pick(*names: str) -> float | None:
+        raw = _payload_pick(payload, *names)
+        try:
+            return float(raw) if raw is not None and raw != "" else None
+        except (TypeError, ValueError):
+            return None
 
     return PalworldWorldOut(
         enabled=True,
-        snapshot_time=str(payload.get("Time") or ""),
-        fps=_actor_num(payload, "FPS"),
-        average_fps=_actor_num(payload, "AverageFPS"),
+        snapshot_time=str(_payload_pick(payload, "Time") or ""),
+        fps=_float_pick("FPS", "fps"),
+        average_fps=_float_pick("AverageFPS", "averagefps"),
+        in_game_time=in_game_time,
+        in_game_days=in_game_days,
         actor_counts=dict(sorted(counts.items())),
         players=players,
         base_camps=camps,
+        workers=workers,
+        wild_pals=wild_pals,
+        npcs=npcs,
+        otomo_pals=otomo,
     )
 
 

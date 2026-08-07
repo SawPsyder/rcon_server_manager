@@ -364,6 +364,8 @@ class PalworldAdapter(DefaultAdapter):
             # Palworld reports a level, not a score - Level is an extra column
             player_score=False,
             kick_ban=True,
+            # /v1/api/ban has no duration parameter — every ban is permanent.
+            timed_ban=False,
             # The API cannot enumerate bans (they live in banlist.txt on the
             # host), so the list is derived from our own moderation history.
             ban_list=True,

@@ -28,6 +28,9 @@ class ServerFeatures:
     # be filled with something that isn't one (Palworld reports a level).
     player_score: bool = True
     kick_ban: bool = False
+    # Timed (duration-based) bans. Off for games like Palworld where every ban
+    # is permanent and the transport has no duration parameter.
+    timed_ban: bool = False
     # The transport can enumerate existing bans. Separate from kick_ban: Palworld
     # can ban but keeps its ban list in a file the REST API never exposes.
     ban_list: bool = False

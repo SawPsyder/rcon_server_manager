@@ -4,6 +4,8 @@ export type ServerFeatures = {
   /** The game reports a per-player score, so the Score column means something. */
   player_score: boolean;
   kick_ban: boolean;
+  /** Timed (duration-based) bans. Off for games where every ban is permanent (e.g. Palworld). */
+  timed_ban: boolean;
   /** The transport can enumerate existing bans (Palworld can ban but not list). */
   ban_list: boolean;
   admin_say: boolean;
@@ -186,18 +188,39 @@ export type PalworldWorldPlayer = {
   hp: number | null;
   max_hp: number | null;
   guild_name: string;
+  guild_id: string;
   location_x: number | null;
   location_y: number | null;
   location_z: number | null;
+  rotation_z: number | null;
   pal_count: number;
 };
 
 export type PalworldBaseCamp = {
+  id: string;
+  guild_name: string;
+  guild_id: string;
+  name: string;
+  location_x: number | null;
+  location_y: number | null;
+  location_z: number | null;
+};
+
+/** Positioned non-player actor for the admin world map. */
+export type PalworldMapEntity = {
+  id: string;
+  name: string;
+  species: string;
+  level: number | null;
+  hp: number | null;
+  max_hp: number | null;
   guild_name: string;
   guild_id: string;
   location_x: number | null;
   location_y: number | null;
   location_z: number | null;
+  rotation_z: number | null;
+  activity: string;
 };
 
 /** Server-side summary of /v1/api/game-data - the raw payload can be huge. */
@@ -208,9 +231,15 @@ export type PalworldWorld = {
   snapshot_time: string;
   fps: number | null;
   average_fps: number | null;
+  in_game_time: string;
+  in_game_days: number | null;
   actor_counts: Record<string, number>;
   players: PalworldWorldPlayer[];
   base_camps: PalworldBaseCamp[];
+  workers: PalworldMapEntity[];
+  wild_pals: PalworldMapEntity[];
+  npcs: PalworldMapEntity[];
+  otomo_pals: PalworldMapEntity[];
 };
 
 export type PalworldAction = {
@@ -391,6 +420,18 @@ export type PublicChartMeta = {
   server_name: string;
 };
 
+export type MapShare = {
+  token: string;
+  url_path: string;
+  created_at: string;
+};
+
+export type PublicMapMeta = {
+  token: string;
+  server_name: string;
+  server_type: string;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
@@ -483,6 +524,16 @@ export const api = {
     request<PlayerStats>(
       `/api/public/charts/${encodeURIComponent(token)}/stats?range=${range}`
     ),
+
+  createMapShare: (id: number) =>
+    request<MapShare>(`/api/servers/${id}/map-share`, { method: "POST" }),
+  getMapShare: (id: number) => request<MapShare>(`/api/servers/${id}/map-share`),
+  deleteMapShare: (id: number) =>
+    request<void>(`/api/servers/${id}/map-share`, { method: "DELETE" }),
+  publicMapMeta: (token: string) =>
+    request<PublicMapMeta>(`/api/public/maps/${encodeURIComponent(token)}/meta`),
+  publicMapWorld: (token: string) =>
+    request<PalworldWorld>(`/api/public/maps/${encodeURIComponent(token)}/world`),
   rcon: (id: number, command: string) =>
     request<RconResult>(`/api/servers/${id}/rcon`, {
       method: "POST",

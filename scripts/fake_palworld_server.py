@@ -46,6 +46,21 @@ FAKE_PLAYERS = [
     ("XboxPal", "xpal", "xsx_2535412345678901"),
 ]
 
+# Stable world positions (UE/save coords) so the admin map doesn't jitter every
+# poll. Converted from well-known in-game map coords via the wiki transform
+# (mapX, mapY) → sav: x = mapY*459 - 123888, y = mapX*459 + 158000.
+# Approx. map spots: plateau / forest / desert / volcano / starting isle.
+FAKE_PLAYER_WORLD_XY: dict[str, tuple[float, float]] = {
+    "76561198084350159": (-364404.0, 158000.0),   # map ~ (0, -524)
+    "76561198012345678": (-180000.0, 50000.0),
+    "76561197960287930": (-50000.0, 250000.0),
+    "76561198234567890": (-420000.0, -80000.0),
+    "xsx_2535412345678901": (-280000.0, 100000.0),
+}
+
+# Base camps sit near their guild owner with a small fixed offset
+FAKE_CAMP_OFFSET = (3500.0, -2200.0)
+
 
 class World:
     """Mutable server state, ticked on read so every poll sees fresh numbers."""
@@ -127,8 +142,8 @@ class World:
                     "ip": f"10.0.0.{FAKE_PLAYERS.index((name, account, steam_id)) + 20}",
                     # Documented as a double, not an int
                     "ping": round(self.rng.uniform(8.0, 92.0), 2),
-                    "location_x": round(self.rng.uniform(-90000, 90000), 2),
-                    "location_y": round(self.rng.uniform(-90000, 90000), 2),
+                    "location_x": FAKE_PLAYER_WORLD_XY[steam_id][0],
+                    "location_y": FAKE_PLAYER_WORLD_XY[steam_id][1],
                     "level": self.levels[steam_id],
                     "building_count": self.buildings[steam_id],
                 }
@@ -187,6 +202,7 @@ class World:
                 continue
             instance = self.instances[steam_id]
             guild = f"{name}'s Guild"
+            wx, wy = FAKE_PLAYER_WORLD_XY[steam_id]
             actors.append(
                 {
                     "Type": "Character",
@@ -203,9 +219,9 @@ class World:
                     "GuildName": guild,
                     "Class": "PlayerCharacter",
                     "Action": "Idle",
-                    "LocationX": round(self.rng.uniform(-90000, 90000), 2),
-                    "LocationY": round(self.rng.uniform(-90000, 90000), 2),
-                    "LocationZ": round(self.rng.uniform(0, 4000), 2),
+                    "LocationX": wx,
+                    "LocationY": wy,
+                    "LocationZ": 1200.0,
                     # Really a string in the API, not a boolean
                     "IsActive": "true",
                 }
@@ -235,8 +251,8 @@ class World:
                     "GuildID": instance[:8],
                     "GuildName": guild,
                     "Class": "PalBox",
-                    "LocationX": round(self.rng.uniform(-90000, 90000), 2),
-                    "LocationY": round(self.rng.uniform(-90000, 90000), 2),
+                    "LocationX": wx + FAKE_CAMP_OFFSET[0],
+                    "LocationY": wy + FAKE_CAMP_OFFSET[1],
                     "LocationZ": 120.0,
                 }
             )
