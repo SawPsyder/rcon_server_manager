@@ -3,8 +3,8 @@
 
 Owning a Palworld server just to check the integration is a poor trade, so this
 stands in for one. It implements all 12 documented endpoints with HTTP Basic
-auth and data that actually moves — server FPS jitters, players join and leave,
-uptime and in-game days climb — which is what the charts, presence tracking and
+auth and data that actually moves - server FPS jitters, players join and leave,
+uptime and in-game days climb - which is what the charts, presence tracking and
 roster tooltips need in order to show anything interesting.
 
     python scripts/fake_palworld_server.py --port 8212 --password test123
@@ -254,7 +254,7 @@ class World:
                 }
             )
         return {
-            # Server local time, deliberately not ISO 8601 — as the real API does
+            # Server local time, deliberately not ISO 8601 - as the real API does
             "Time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "FPS": float(self.fps),
             "AverageFPS": round(float(self.fps) - 1.4, 2),

@@ -87,7 +87,7 @@ class StatsCollector:
                     adapter = get_adapter(st)
                 except KeyError:
                     logger.warning(
-                        "Server %s has unknown type %r — sampling as %s",
+                        "Server %s has unknown type %r - sampling as %s",
                         server.id,
                         st,
                         DEFAULT_SERVER_TYPE,
@@ -115,7 +115,7 @@ class StatsCollector:
                     )
                 elif snap.get("source") == "a2s" and password == "" and server.rcon_password_enc:
                     logger.warning(
-                        "Server %s: RCON password could not be decrypted — re-save it in Servers",
+                        "Server %s: RCON password could not be decrypted - re-save it in Servers",
                         server.id,
                     )
                 elif snap.get("source") == "a2s" and not password:

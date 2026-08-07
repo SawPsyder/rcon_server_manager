@@ -325,14 +325,14 @@ def test_query_status_maps_info_and_metrics(fake_pool):
     assert snap["hostname"] == "Pal Prime"
     assert snap["version"] == "v1.0.2"
     assert snap["players"] == 3 and snap["max_players"] == 32
-    # Palworld has no concept of these — None, never zeroed
+    # Palworld has no concept of these - None, never zeroed
     assert snap["map"] is None and snap["gamemode"] is None
     assert snap["bots"] is None and snap["ping_ms"] is None
     assert snap["extra"]["server_fps"] == 57
     assert snap["extra"]["in_game_days"] == 4
     assert snap["extra"]["base_camps"] == 5
     # The admin panel has no overview tab, so every at-a-glance value has to
-    # reach the status cards through extra — including the version string,
+    # reach the status cards through extra - including the version string,
     # which nothing renders from the top-level ServerStatus field.
     assert snap["extra"]["version"] == "v1.0.2"
     assert snap["extra"]["world_guid"] == RAW_INFO["worldguid"]
@@ -385,7 +385,7 @@ def test_sample_players_never_raises(fake_pool):
     assert snap["online"] is False
     assert snap["players"] == 0
     assert "connection refused" in snap["api_error"]
-    # None, not 0.0 — the chart must show a gap, not a crash to zero
+    # None, not 0.0 - the chart must show a gap, not a crash to zero
     assert snap["tick_rate"] is None
 
 
@@ -467,7 +467,7 @@ def test_commands_are_quoted_like_the_rest_of_the_app(fake_pool):
         )
         == 'ban gdk_2535470764765514 "Just a test"'
     )
-    # Nothing to quote — stay bare
+    # Nothing to quote - stay bare
     assert a.build_unban_command("gdk_2535470764765514") == "unban gdk_2535470764765514"
     assert (
         a.build_kick_command(player_name="Jay", net_id="76561198012345678", reason="afk")
@@ -636,7 +636,7 @@ def test_game_data_summary_links_pals_to_their_owner():
     }
     out = summarize_game_data(payload)
     assert out.enabled is True
-    # Not ISO 8601 — passed through as the server wrote it
+    # Not ISO 8601 - passed through as the server wrote it
     assert out.snapshot_time == "2026-08-07 12:00:00"
     assert out.fps == pytest.approx(61.0)
     assert out.actor_counts == {

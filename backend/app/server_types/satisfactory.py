@@ -7,7 +7,7 @@ HTTPS API on the game port, so this adapter overrides both transport hooks of
 One consequence shapes the whole feature set: **no API function returns a
 player list.** ``QueryServerState`` gives ``numConnectedPlayers`` and
 ``playerLimit`` only, so player-count history and charts work while rosters,
-presence tracking, identity lookups and kick/ban do not — those features are
+presence tracking, identity lookups and kick/ban do not - those features are
 switched off rather than faked.
 """
 
@@ -130,7 +130,7 @@ def normalize_state(raw: dict[str, Any]) -> dict[str, Any]:
     """Flatten a ``serverGameState`` object into snake_case python values."""
     from app.services.satisfactory_api import pick
 
-    # Coerce without `or default` — that would rewrite legitimate zeroes
+    # Coerce without `or default` - that would rewrite legitimate zeroes
     def _int(name: str, default: int = 0) -> int:
         try:
             return int(pick(raw, name, default))
@@ -271,7 +271,7 @@ class SatisfactoryAdapter(DefaultAdapter):
         try:
             state = normalize_state(client.query_server_state())
         except SatisfactoryApiError as exc:
-            # Reachable but not authenticated — say so instead of "offline"
+            # Reachable but not authenticated - say so instead of "offline"
             return {
                 **offline,
                 "online": True,
@@ -323,7 +323,7 @@ class SatisfactoryAdapter(DefaultAdapter):
         timeout: float = 3.0,
         options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Player *count* only — the API exposes no per-player data."""
+        """Player *count* only - the API exposes no per-player data."""
         endpoint = self._endpoint(host, query_port, rcon_password, options)
         snap: dict[str, Any] = {
             "online": False,
@@ -375,7 +375,7 @@ class SatisfactoryAdapter(DefaultAdapter):
         if snap.get("online") and snap.get("api_error"):
             return f"Satisfactory API error: {snap['api_error']}"
         if snap.get("online") and snap.get("paused"):
-            return "Game is paused — no players are connected."
+            return "Game is paused - no players are connected."
         return None
 
 

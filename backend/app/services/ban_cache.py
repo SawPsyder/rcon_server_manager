@@ -47,8 +47,8 @@ def replace_server_bans(
                     raw_id=str(row.get("raw_id") or ""),
                     net_id=str(row.get("net_id") or row.get("raw_id") or ""),
                     display_id=str(row.get("display_id") or row.get("raw_id") or ""),
-                    duration=str(row.get("duration") or "—"),
-                    reason=str(row.get("reason") or "—"),
+                    duration=str(row.get("duration") or "-"),
+                    reason=str(row.get("reason") or "-"),
                     permanent=bool(row.get("permanent")),
                 )
             )
@@ -59,8 +59,8 @@ def rebuild_local_bans(db: Session, server_id: int) -> int:
 
     For games whose API cannot enumerate bans (Palworld keeps them in a
     ``banlist.txt`` the REST API never exposes), the only bans we can know about
-    are the ones we issued. Folding ``player_action_logs`` — latest ban/unban
-    per identity wins — gives that list, and writing it through
+    are the ones we issued. Folding ``player_action_logs`` - latest ban/unban
+    per identity wins - gives that list, and writing it through
     :func:`replace_server_bans` means pagination and Steam name resolution reuse
     the same path as a live ``listbans``.
 
@@ -100,7 +100,7 @@ def rebuild_local_bans(db: Session, server_id: int) -> int:
             known_raw[parsed] = stats.steam_id
 
     # Drop unbanned identities before numbering, so the displayed indexes are
-    # 1..n with no gaps — matching how a live listbans numbers its rows.
+    # 1..n with no gaps - matching how a live listbans numbers its rows.
     still_banned = [
         (key, row)
         for key, row in sorted(
@@ -122,7 +122,7 @@ def rebuild_local_bans(db: Session, server_id: int) -> int:
                 "display_id": external_id,
                 # No API takes a duration, so anything we issued is permanent
                 "duration": "Permanent",
-                "reason": row.reason or "—",
+                "reason": row.reason or "-",
                 "permanent": True,
             }
         )
@@ -199,7 +199,7 @@ def _attach_names(db: Session, rows: list[ServerBanEntry]) -> list[dict[str, Any
     for r in rows:
         sid = extract_steam_id(r.raw_id or r.display_id or r.net_id or "")
         # Take the first candidate that actually carries a name. `or` chaining
-        # would stop at a resolved-but-empty entry and mask a later hit — which
+        # would stop at a resolved-but-empty entry and mask a later hit - which
         # is what hid crossplay names behind resolve_names' Steam/EOS-only view.
         candidates = (
             names.get(r.raw_id),
@@ -217,8 +217,8 @@ def _attach_names(db: Session, rows: list[ServerBanEntry]) -> list[dict[str, Any
                 "raw_id": r.raw_id,
                 "net_id": r.net_id or r.raw_id,
                 "display_id": r.display_id or r.raw_id,
-                "duration": r.duration or "—",
-                "reason": r.reason or "—",
+                "duration": r.duration or "-",
+                "reason": r.reason or "-",
                 "permanent": bool(r.permanent),
                 "display_name": str(info.get("display_name") or ""),
                 "profile_url": str(info.get("profile_url") or ""),

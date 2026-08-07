@@ -25,7 +25,7 @@ class CertFetchError(CommandError):
     """Reading a server's certificate failed.
 
     ``kind`` is ``"tls"`` (handshake failed), ``"timeout"``, or ``"connect"``.
-    Callers translate it into their own error taxonomy — the distinction matters
+    Callers translate it into their own error taxonomy - the distinction matters
     because a server that is simply **down** must not be reported as having a
     certificate problem, or the operator chases the wrong fix.
     """
@@ -68,6 +68,6 @@ def fetch_cert_fingerprint(host: str, port: int, timeout: float = 10.0) -> str:
 
 def pin_mismatch_message(host: str, port: int, expected: str, observed: str) -> str:
     return (
-        f"Certificate fingerprint mismatch for {host}:{port} — expected "
+        f"Certificate fingerprint mismatch for {host}:{port} - expected "
         f"{format_fingerprint(expected)}, server presented {format_fingerprint(observed)}"
     )

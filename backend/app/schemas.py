@@ -130,11 +130,11 @@ class PlayerInfo(BaseModel):
     rank: int | None = None
     ranked_players: int = 0
     last_seen_at: str | None = None
-    last_seen_pretty: str = "—"
+    last_seen_pretty: str = "-"
     # End of the session before the current one. Every row in the player table
     # is someone online, so this is the only last-seen value that says anything.
     previous_seen_at: str | None = None
-    previous_seen_pretty: str = "—"
+    previous_seen_pretty: str = "-"
     duration: float = 0.0
     duration_pretty: str = "00:00:00"
     # Game-specific per-player scalars with no column of their own, rendered as
@@ -330,7 +330,7 @@ class PalworldBaseCampOut(BaseModel):
 
 
 class PalworldWorldOut(BaseModel):
-    """Server-side summary of /v1/api/game-data — the raw payload can be huge."""
+    """Server-side summary of /v1/api/game-data - the raw payload can be huge."""
 
     enabled: bool = True
     hint: str = ""

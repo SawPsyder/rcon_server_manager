@@ -217,7 +217,7 @@ def test_bodyless_posts_send_content_length_zero():
 
 
 def test_kick_and_ban_send_lowercase_userid():
-    # The community OpenAPI spec says "userId" — it is wrong
+    # The community OpenAPI spec says "userId" - it is wrong
     handler, seen = recorder(status=200, text="ok")
     client = make_client(handler)
     client.kick("steam_76561198084350159", "bye")

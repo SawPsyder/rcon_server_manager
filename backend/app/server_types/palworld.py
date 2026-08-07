@@ -1,6 +1,6 @@
 """Palworld dedicated server type adapter (REST API transport).
 
-Palworld has no A2S query and no Source RCON — or rather, it has RCON but
+Palworld has no A2S query and no Source RCON - or rather, it has RCON but
 Pocketpair deprecated it in favour of the REST API, which is strictly more
 capable. Everything here runs over ``http://<host>:8212/v1/api``, so this
 adapter overrides both transport hooks of
@@ -131,7 +131,7 @@ def to_local_id(user_id: str) -> str:
 
 
 def to_api_user_id(net_id: str) -> str:
-    """Inverse of :func:`to_local_id` — what ``/kick``, ``/ban``, ``/unban`` want."""
+    """Inverse of :func:`to_local_id` - what ``/kick``, ``/ban``, ``/unban`` want."""
     text = (net_id or "").strip()
     if text.isdigit() and len(text) == 17:
         return f"{STEAM_PREFIX}{text}"
@@ -159,7 +159,7 @@ def normalize_metrics(raw: Mapping[str, Any]) -> dict[str, Any]:
     """``/v1/api/metrics`` → snake_case, with absent fields left as ``None``.
 
     ``basecampnum`` is 1.x-only and ``days`` post-0.2.x, so nothing is defaulted
-    to zero — a missing field must not render as a real reading of 0.
+    to zero - a missing field must not render as a real reading of 0.
     """
     return {
         "server_fps": _int_or_none(pick(raw, "serverfps")),
@@ -309,8 +309,8 @@ def client_for_server(
 
 def _render_info(info: Mapping[str, Any]) -> str:
     lines = [
-        f"Name:    {info.get('server_name') or '—'}",
-        f"Version: {info.get('version') or '—'}",
+        f"Name:    {info.get('server_name') or '-'}",
+        f"Version: {info.get('version') or '-'}",
     ]
     if info.get("description"):
         lines.append(f"About:   {info['description']}")
@@ -329,7 +329,7 @@ def _render_metrics(metrics: Mapping[str, Any]) -> str:
         ("In-game days", metrics.get("days")),
         ("Base camps", metrics.get("base_camps")),
     ]
-    return "\n".join(f"{label:<13}{'—' if value is None else value}" for label, value in rows)
+    return "\n".join(f"{label:<13}{'-' if value is None else value}" for label, value in rows)
 
 
 def _render_players(players: list[dict[str, Any]]) -> str:
@@ -338,9 +338,9 @@ def _render_players(players: list[dict[str, Any]]) -> str:
     header = f"{'Name':<24}{'Level':>6}  {'Ping':>7}  User ID"
     lines = [header, "-" * len(header)]
     for p in players:
-        ping = "—" if p.get("ping") is None else f"{p['ping']:.0f}ms"
-        level = "—" if p.get("level") is None else p["level"]
-        lines.append(f"{p['name'][:23]:<24}{level:>6}  {ping:>7}  {p.get('user_id') or '—'}")
+        ping = "-" if p.get("ping") is None else f"{p['ping']:.0f}ms"
+        level = "-" if p.get("level") is None else p["level"]
+        lines.append(f"{p['name'][:23]:<24}{level:>6}  {ping:>7}  {p.get('user_id') or '-'}")
     return "\n".join(lines)
 
 
@@ -361,7 +361,7 @@ class PalworldAdapter(DefaultAdapter):
         features=ServerFeatures(
             map_travel=False,
             structured_player_list=True,
-            # Palworld reports a level, not a score — Level is an extra column
+            # Palworld reports a level, not a score - Level is an extra column
             player_score=False,
             kick_ban=True,
             # The API cannot enumerate bans (they live in banlist.txt on the
@@ -421,7 +421,7 @@ class PalworldAdapter(DefaultAdapter):
         try:
             verb, *args = shlex.split(text)
         except ValueError as exc:
-            # Unbalanced quotes — shlex is what parses the builders' output
+            # Unbalanced quotes - shlex is what parses the builders' output
             raise PalworldApiError(f"Could not parse command: {exc}") from exc
 
         client = palworld_pool.client(
@@ -454,7 +454,7 @@ class PalworldAdapter(DefaultAdapter):
             result = confirm_text(client.ban(userid, reason), f"Banned {userid}.")
             # /v1/api/ban takes no duration, so a timed ban from the generic UI
             # silently becomes permanent. Say so rather than let it surprise.
-            return f"{result} Palworld bans are permanent — no duration was applied."
+            return f"{result} Palworld bans are permanent - no duration was applied."
 
         if verb == "unban":
             if not args:
@@ -477,7 +477,7 @@ class PalworldAdapter(DefaultAdapter):
 
         if verb == "stop":
             return confirm_text(
-                client.stop(), "Server force stopped — the world was not saved."
+                client.stop(), "Server force stopped - the world was not saved."
             )
 
         raise PalworldApiError(f"Unsupported command: {verb}")
@@ -540,7 +540,7 @@ class PalworldAdapter(DefaultAdapter):
             info = normalize_info(client.info())
         except PalworldAuthError as exc:
             # Every Palworld endpoint requires auth, so a 401 is proof the server
-            # is up — report "reachable but rejected", not "offline".
+            # is up - report "reachable but rejected", not "offline".
             return {**offline, "online": True, "error": str(exc)}
         except PalworldApiError as exc:
             return {**offline, "error": str(exc)}
@@ -585,7 +585,7 @@ class PalworldAdapter(DefaultAdapter):
     ) -> dict[str, Any]:
         """Counts from ``/metrics`` plus the roster from ``/players``.
 
-        Never raises — the stats collector loop depends on getting a snapshot
+        Never raises - the stats collector loop depends on getting a snapshot
         back even when the server is unreachable.
         """
         endpoint = self._endpoint(host, query_port, rcon_password, options)
@@ -595,7 +595,7 @@ class PalworldAdapter(DefaultAdapter):
             "max_players": 0,
             "bots": 0,
             "player_list": [],
-            # Only true once /players actually answered — an empty roster we
+            # Only true once /players actually answered - an empty roster we
             # read is "everyone left", an unread one is "we don't know".
             "roster_known": False,
             "source": "offline",

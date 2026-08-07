@@ -95,7 +95,7 @@ export default function ServersPage() {
           ? form.preferred_gamemode.trim()
           : null;
 
-      // One API port for single-port games — the backend keeps both columns in sync
+      // One API port for single-port games - the backend keeps both columns in sync
       const queryPort = Number(form.query_port);
       const rconPort = singlePort ? queryPort : Number(form.rcon_port);
       // TLS settings only mean something over HTTPS; a plain-HTTP type would
@@ -280,7 +280,7 @@ export default function ServersPage() {
                   onChange={(e) =>
                     setForm({ ...form, cert_fingerprint: e.target.value })
                   }
-                  placeholder="aa:bb:cc:… — leave blank to skip certificate checks"
+                  placeholder="aa:bb:cc:… - leave blank to skip certificate checks"
                 />
               </label>
             </>

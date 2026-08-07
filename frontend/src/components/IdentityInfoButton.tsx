@@ -5,7 +5,7 @@ type Props = {
   onClick: () => void;
 };
 
-/** Small "i" control — grey when empty, blue when history/notes exist. */
+/** Small "i" control - grey when empty, blue when history/notes exist. */
 export default function IdentityInfoButton({
   hasInfo,
   disabled,

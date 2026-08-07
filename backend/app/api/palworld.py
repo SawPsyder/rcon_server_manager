@@ -1,8 +1,8 @@
 """Palworld-specific admin endpoints (REST API passthrough).
 
-These operations have no equivalent in the other server types — world saves,
+These operations have no equivalent in the other server types - world saves,
 graceful shutdown with a countdown, the read-only settings block, the game-data
-world snapshot — so they get their own router instead of being forced into the
+world snapshot - so they get their own router instead of being forced into the
 generic adapter contract. The frontend shows the panel only when a type
 advertises ``features.admin_api``.
 
@@ -192,8 +192,8 @@ def _actor_int(actor: Mapping[str, Any], key: str) -> int | None:
 def summarize_game_data(payload: Mapping[str, Any]) -> PalworldWorldOut:
     """Reduce the actor dump to something a browser can hold.
 
-    ``/v1/api/game-data`` returns every actor in the world — players, their
-    Pals, wild Pals, NPCs and base camps — which on a busy server is megabytes.
+    ``/v1/api/game-data`` returns every actor in the world - players, their
+    Pals, wild Pals, NPCs and base camps - which on a busy server is megabytes.
     The panel only needs per-player detail plus counts, so the reduction happens
     here and the raw payload never leaves the backend.
     """
@@ -280,7 +280,7 @@ def world(
         payload = client.game_data()
     except PalworldApiError as exc:
         if exc.code == GAMEDATA_DISABLED_CODE:
-            # Not a failure the operator can fix from here — explain the flag
+            # Not a failure the operator can fix from here - explain the flag
             return PalworldWorldOut(enabled=False, hint=str(exc))
         raise _http_error(exc) from exc
     return summarize_game_data(payload)
@@ -348,5 +348,5 @@ def stop(
     return PalworldActionOut(
         ok=True,
         # /stop terminates immediately without writing the world
-        detail=f"{detail}\nForce stop does not save — unsaved progress is lost.",
+        detail=f"{detail}\nForce stop does not save - unsaved progress is lost.",
     )

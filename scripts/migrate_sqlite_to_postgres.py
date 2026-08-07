@@ -7,7 +7,7 @@ Usage (from repo root, with backend venv activated):
   python scripts/migrate_sqlite_to_postgres.py --sqlite data/app.db
 
 Does not drop existing Postgres tables. By default skips tables that already
-have rows (use --force to wipe target tables first — destructive).
+have rows (use --force to wipe target tables first - destructive).
 """
 
 from __future__ import annotations

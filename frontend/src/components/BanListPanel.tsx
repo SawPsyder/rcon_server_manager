@@ -99,7 +99,7 @@ export default function BanListPanel({
           <>Web API + local identity cache.</>
         ) : (
           <>
-            local cache/play history only — set <code>STEAM_WEB_API_KEY</code> for full lookup.
+            local cache/play history only - set <code>STEAM_WEB_API_KEY</code> for full lookup.
           </>
         )}
       </p>
@@ -172,7 +172,7 @@ export default function BanListPanel({
                         ) : b.display_name ? (
                           <strong>{b.display_name}</strong>
                         ) : (
-                          <span className="muted">—</span>
+                          <span className="muted">-</span>
                         )}
                         {b.name_source ? (
                           <div className="muted" style={{ fontSize: "0.7rem" }}>

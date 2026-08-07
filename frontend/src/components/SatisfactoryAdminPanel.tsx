@@ -41,7 +41,7 @@ type Row = {
   key: string;
   raw: unknown;
   spec: FieldSpec;
-  /** Canonical draft form of the server's current value — the diff baseline. */
+  /** Canonical draft form of the server's current value - the diff baseline. */
   base: string;
   /** False for catalogue keys this server did not report (advanced settings). */
   present: boolean;
@@ -54,7 +54,7 @@ function errorText(err: unknown): string {
 function saveLabel(header: SatisfactorySaveHeader): string {
   const name = String(header.saveName || "(unnamed)");
   const when = header.saveDateTime ? String(header.saveDateTime) : "";
-  return when ? `${name} — ${when}` : name;
+  return when ? `${name} - ${when}` : name;
 }
 
 function buildRows(
@@ -102,7 +102,7 @@ function EnumSelect({ spec, value, onChange, disabled }: ControlProps) {
       list.unshift(
         value === ""
           ? { value: "", label: "(not set)" }
-          : { value, label: `${value} — reported by server` }
+          : { value, label: `${value} - reported by server` }
       );
     }
     return list;
@@ -438,7 +438,7 @@ export default function SatisfactoryAdminPanel({ serverId, onChanged }: Props) {
                           />
                         </td>
                         <td className="muted">
-                          {options.pending_server_options[row.key] ?? "—"}
+                          {options.pending_server_options[row.key] ?? "-"}
                         </td>
                       </tr>
                     ))
@@ -501,7 +501,7 @@ export default function SatisfactoryAdminPanel({ serverId, onChanged }: Props) {
               <p className="muted">
                 Creative mode: {advanced.creative_mode_enabled ? "enabled" : "disabled"}
                 {Object.keys(advanced.advanced_game_settings).length === 0 &&
-                  " — this save has no advanced settings yet, so applying any of the below is what enables them."}
+                  " - this save has no advanced settings yet, so applying any of the below is what enables them."}
               </p>
               <div className="table-wrap">
                 <table>
@@ -640,7 +640,7 @@ export default function SatisfactoryAdminPanel({ serverId, onChanged }: Props) {
                               <tr key={`${save}-${hIndex}`}>
                                 <td title={saveLabel(header)}>{save || "(unnamed)"}</td>
                                 <td>{Math.round(seconds / 3600)} h</td>
-                                <td className="muted">{flags.join(", ") || "—"}</td>
+                                <td className="muted">{flags.join(", ") || "-"}</td>
                                 <td className="row right">
                                   <button
                                     className="btn small"

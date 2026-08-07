@@ -26,7 +26,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      {/* Public share — no session required */}
+      {/* Public share - no session required */}
       <Route path="/share/c/:token" element={<SharedChartPage />} />
       <Route
         path="/"

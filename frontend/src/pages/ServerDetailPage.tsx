@@ -65,7 +65,7 @@ function extraStatLabel(key: string): string {
 
 function formatExtraStat(value: string | number | boolean | null): string {
   if (typeof value === "boolean") return value ? "Yes" : "No";
-  return value === null ? "—" : String(value);
+  return value === null ? "-" : String(value);
 }
 
 /** Seed status cards immediately from last cached poll (no wait for live query). */
@@ -305,7 +305,7 @@ export default function ServerDetailPage() {
     setStatus(statusFromServerCache(selectedServer));
     loadServerExtras(selectedServer);
     refreshStatus();
-    // Only re-seed when the selected server id changes — not when cache fields update after poll
+    // Only re-seed when the selected server id changes - not when cache fields update after poll
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: avoid loop with setServers in refreshStatus
   }, [validServerId, selectedServer?.id, refreshStatus, loadServerExtras]);
 
@@ -365,7 +365,7 @@ export default function ServerDetailPage() {
       } else {
         setBansError(
           (res.bans || []).length === 0 && (res.total ?? 0) === 0 && res.raw
-            ? "Response received but no ban rows could be parsed — try Show raw."
+            ? "Response received but no ban rows could be parsed - try Show raw."
             : res.error || ""
         );
       }
@@ -530,7 +530,7 @@ export default function ServerDetailPage() {
       <section className="stats">
         <div className="stat card">
           <div className="stat-label">Hostname</div>
-          <div className="stat-value">{status?.hostname || "—"}</div>
+          <div className="stat-value">{status?.hostname || "-"}</div>
         </div>
         {/* Conditional like Gamemode below: games with a single world report no
             map at all (Palworld), and an always-empty card is just noise. */}
@@ -538,7 +538,7 @@ export default function ServerDetailPage() {
           <div className="stat card">
             <div className="stat-label">Map</div>
             <div className="stat-value">
-              {status?.map || "—"}
+              {status?.map || "-"}
               {status?.lighting ? ` (${status.lighting})` : ""}
             </div>
           </div>
@@ -546,14 +546,14 @@ export default function ServerDetailPage() {
         <div className="stat card">
           <div className="stat-label">Players</div>
           <div className="stat-value">
-            {status?.players ?? "—"}/{status?.max_players ?? "—"}
+            {status?.players ?? "-"}/{status?.max_players ?? "-"}
           </div>
         </div>
         {(status?.gamemode || status?.coop_or_versus) && (
           <div className="stat card">
             <div className="stat-label">Gamemode</div>
             <div className="stat-value">
-              {status?.gamemode || "—"}
+              {status?.gamemode || "-"}
               {status?.coop_or_versus ? ` · ${status.coop_or_versus}` : ""}
             </div>
           </div>
@@ -570,7 +570,7 @@ export default function ServerDetailPage() {
 
       <PlayerStatsChart serverId={validServerId} showShare />
 
-      {/* Separate chart, not a second axis on the player one — tick rate and
+      {/* Separate chart, not a second axis on the player one - tick rate and
           player count share no scale. */}
       {features.tick_rate_history && validServerId && (
         <TickRateChart
@@ -610,7 +610,7 @@ export default function ServerDetailPage() {
                   Visits
                 </th>
                 {/* Everyone listed here is online, so "last seen" would read
-                    "Online" on every row — show when they were previously on. */}
+                    "Online" on every row - show when they were previously on. */}
                 <th title="End of the player's previous session, before this one">
                   Last visit
                 </th>
@@ -650,7 +650,7 @@ export default function ServerDetailPage() {
                       >
                         {p.rank != null && (p.ranked_players ?? 0) > 0
                           ? `${p.rank}/${p.ranked_players}`
-                          : "—"}
+                          : "-"}
                       </span>
                     </td>
                     <td>
@@ -679,13 +679,13 @@ export default function ServerDetailPage() {
                     <td>{p.total_pretty || "0s"}</td>
                     <td>{p.visit_count ?? 0}</td>
                     <td title={p.previous_seen_at || undefined}>
-                      {p.previous_seen_pretty || "—"}
+                      {p.previous_seen_pretty || "-"}
                     </td>
                     <td>
-                      <code className="steam-id">{p.ip || "—"}</code>
+                      <code className="steam-id">{p.ip || "-"}</code>
                     </td>
                     <td>
-                      <code className="steam-id">{p.steamid || "—"}</code>
+                      <code className="steam-id">{p.steamid || "-"}</code>
                     </td>
                   </tr>
                 ))

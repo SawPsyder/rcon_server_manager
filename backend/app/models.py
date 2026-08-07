@@ -263,7 +263,7 @@ class PlayerActionLog(Base):
     server_name: Mapped[str] = mapped_column(String(255), default="")
     player_name: Mapped[str] = mapped_column(String(255), default="")
     # The id exactly as sent to the game server. (platform, external_id) is
-    # canonical but lossy — gdk_ and xsx_ both normalise to "xbox", and
+    # canonical but lossy - gdk_ and xsx_ both normalise to "xbox", and
     # Palworld's /unban needs the original string back.
     net_id: Mapped[str] = mapped_column(String(64), default="")
     reason: Mapped[str] = mapped_column(Text, default="")

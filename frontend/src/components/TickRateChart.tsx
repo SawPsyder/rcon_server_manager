@@ -21,7 +21,7 @@ const RANGES: { value: StatsRange; label: string }[] = [
 
 const DEFAULT_REFRESH_MS = 60_000;
 
-// What the series means differs per game — Satisfactory reports simulation
+// What the series means differs per game - Satisfactory reports simulation
 // ticks against a 30/s target, Palworld reports server FPS against 60. The
 // defaults are Satisfactory's, so callers that pass nothing render as before.
 const DEFAULT_LABEL = "Tick rate";
@@ -29,7 +29,7 @@ const DEFAULT_UNIT = "tps";
 /** What a healthy server simulates at. Dips below mean load. */
 const DEFAULT_TARGET = 30;
 
-/** The app's secondary accent — the player chart owns amber. */
+/** The app's secondary accent - the player chart owns amber. */
 const LINE = "#3d8bfd";
 const GRID = "#2a3544";
 const AXIS = "#93a1b5";
@@ -50,7 +50,7 @@ type Props = {
 
 type ChartPoint = {
   t: string;
-  /** null renders as a gap — the server was offline, paused, or pre-upgrade. */
+  /** null renders as a gap - the server was offline, paused, or pre-upgrade. */
   tick: number | null;
   online: boolean;
 };
@@ -164,7 +164,7 @@ export default function TickRateChart({
     [stats]
   );
 
-  // Samples exist but none carried a reading — say so instead of drawing nothing
+  // Samples exist but none carried a reading - say so instead of drawing nothing
   const hasReadings = chartData.some((p) => p.tick != null);
   const chartHeight = typeof height === "number" && height > 0 ? height : 220;
 
@@ -175,13 +175,13 @@ export default function TickRateChart({
           <h2 style={{ margin: 0, fontSize: "1rem" }}>{label}</h2>
           <div className="chart-summary row wrap">
             <span className="chip">
-              Latest: <strong>{stats?.current_tick_rate ?? "—"}</strong>
+              Latest: <strong>{stats?.current_tick_rate ?? "-"}</strong>
             </span>
             <span className="chip">
-              Lowest: <strong>{stats?.min_tick_rate ?? "—"}</strong>
+              Lowest: <strong>{stats?.min_tick_rate ?? "-"}</strong>
             </span>
             <span className="chip">
-              Avg: <strong>{stats?.avg_tick_rate ?? "—"}</strong>
+              Avg: <strong>{stats?.avg_tick_rate ?? "-"}</strong>
             </span>
           </div>
         </div>

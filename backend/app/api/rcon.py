@@ -286,7 +286,7 @@ def list_bans(
     page_size = min(100, max(1, page_size))
 
     if adapter.info.ban_list_source == "local":
-        # Nothing live to query — rebuild from our own moderation history so a
+        # Nothing live to query - rebuild from our own moderation history so a
         # ban or unban issued elsewhere in the app is reflected immediately.
         try:
             rebuild_local_bans(db, server_id)
@@ -300,7 +300,7 @@ def list_bans(
         cached = load_cached_bans(db, server_id, page=page, page_size=page_size)
         if cached.get("has_snapshot"):
             return _ban_list_out(server_id, cached, from_cache=True)
-        # No cache yet — fall through to live fetch once
+        # No cache yet - fall through to live fetch once
 
     result = _exec(db, server_id, "listbans")
     if not result.ok:

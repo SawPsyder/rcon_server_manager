@@ -2,7 +2,7 @@
 
 The dedicated server exposes a small REST API, enabled in ``PalWorldSettings.ini``
 with ``RESTAPIEnabled=True`` / ``RESTAPIPort=8212``. There is no launch argument
-for it, and it listens on a port of its own — separate from the game port (8211)
+for it, and it listens on a port of its own - separate from the game port (8211)
 and from RCON (25575), which Pocketpair has deprecated in favour of this API::
 
     GET  http://<host>:8212/v1/api/metrics
@@ -10,15 +10,15 @@ and from RCON (25575), which Pocketpair has deprecated in favour of this API::
 
 Differences from the Satisfactory transport that shaped this module:
 
-* **Auth** — HTTP Basic, and stateless: the username is the literal string
+* **Auth** - HTTP Basic, and stateless: the username is the literal string
   ``admin`` and the password is ``AdminPassword`` from the INI. There is no
-  token to obtain, cache or refresh. What *is* worth caching is the failure —
+  token to obtain, cache or refresh. What *is* worth caching is the failure -
   a rejected password would otherwise be retried on every status poll.
-* **TLS** — the server speaks plain HTTP and has no TLS support at all. The
+* **TLS** - the server speaks plain HTTP and has no TLS support at all. The
   upstream docs warn these endpoints "are not designed to be exposed directly
   to the Internet", so reverse-proxied deployments are common; ``use_https``
   switches the scheme and re-uses the shared verification / pinning helpers.
-* **Errors** — the API documents only 200/400/401 and defines **no** error body
+* **Errors** - the API documents only 200/400/401 and defines **no** error body
   schema. POST success bodies are undocumented too, so every call keys off the
   status code and treats the body as best-effort.
 """
@@ -105,7 +105,7 @@ class ApiEndpoint:
 
     @property
     def key(self) -> tuple[str, int, str, str, bool, bool, str]:
-        """Pool identity — every field, so any change opens a fresh session."""
+        """Pool identity - every field, so any change opens a fresh session."""
         return (
             self.host.strip(),
             int(self.port),
@@ -120,8 +120,8 @@ class ApiEndpoint:
 def pick(data: Any, name: str, default: Any = None) -> Any:
     """Read ``name`` from a response mapping, ignoring key capitalisation.
 
-    Palworld contradicts its own documentation on casing — ``/players`` returns
-    ``userId`` while ``/game-data`` returns ``userid`` for the same value — so
+    Palworld contradicts its own documentation on casing - ``/players`` returns
+    ``userId`` while ``/game-data`` returns ``userid`` for the same value - so
     matching a single spelling exactly is how a field silently reads as empty.
     (``satisfactory_api`` carries its own copy of this for the same reason; the
     two transports stay decoupled deliberately.)
@@ -159,7 +159,7 @@ def _gamedata_disabled() -> PalworldApiError:
 class PalworldClient:
     """One authenticated conversation with a server's REST API.
 
-    Not created directly in app code — use :data:`palworld_pool` so the
+    Not created directly in app code - use :data:`palworld_pool` so the
     underlying connection pool is reused across polls.
     """
 
@@ -182,7 +182,7 @@ class PalworldClient:
         self.call_count = 0
 
         # Pin verification does network I/O, so skip it when a test transport is
-        # injected — there is no real socket to read a certificate from.
+        # injected - there is no real socket to read a certificate from.
         if endpoint.cert_fingerprint and endpoint.use_https and transport is None:
             self._verify_pinned_certificate()
 
@@ -284,7 +284,7 @@ class PalworldClient:
             if "certificate" in lowered or "ssl" in lowered or "tls" in lowered:
                 raise PalworldTlsError(
                     f"TLS handshake failed for {url}: {message}. Palworld itself serves "
-                    f"plain HTTP — turn off 'Use HTTPS' unless the server sits behind a "
+                    f"plain HTTP - turn off 'Use HTTPS' unless the server sits behind a "
                     f"reverse proxy, or turn off 'Verify TLS' and pin its fingerprint."
                 ) from exc
             raise PalworldApiError(f"Could not connect to {url}: {message}") from exc
@@ -343,7 +343,7 @@ class PalworldClient:
         """World actor snapshot. Needs the server launched with ``-enable-gamedata-api``.
 
         Without the flag the server answers with a plain-text refusal rather than
-        a status code, and reportedly not always with 200 — so the marker is
+        a status code, and reportedly not always with 200 - so the marker is
         checked on both the success and the failure path and re-raised with a
         code the router can turn into setup instructions.
         """
@@ -397,7 +397,7 @@ def _as_dict(payload: Any) -> dict[str, Any]:
 
 
 def _as_text(payload: Any) -> str:
-    """POST responses are undocumented — surface whatever came back, or 'ok'."""
+    """POST responses are undocumented - surface whatever came back, or 'ok'."""
     if payload is None:
         return "ok"
     if isinstance(payload, str):

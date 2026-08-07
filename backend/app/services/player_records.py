@@ -56,13 +56,13 @@ def log_player_action(
     """Persist a moderation action. Skips if no usable platform id."""
     ident = normalize_identity(net_id=net_id, platform_hint=platform_hint)
     if ident is None:
-        # Try name-only is not allowed for identity key — skip log
+        # Try name-only is not allowed for identity key - skip log
         return None
     platform, external_id = ident
 
     name = (player_name or "").strip()
     if name:
-        # Cache the name for every platform, not just Steam — otherwise a
+        # Cache the name for every platform, not just Steam - otherwise a
         # kicked Game Pass player has no name in the dossier unless presence
         # happened to see them first. Only Steam has a public profile URL.
         remember_identity(

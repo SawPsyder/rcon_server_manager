@@ -6,7 +6,7 @@ and registering it in ``app.server_types.__init__``.
 
 :class:`DefaultAdapter` carries the Source-engine behaviour the app started
 with: A2S for status and Source RCON for commands. Games that speak something
-else — e.g. Satisfactory's HTTPS API — override the two transport hooks
+else - e.g. Satisfactory's HTTPS API - override the two transport hooks
 (:meth:`~DefaultAdapter.query_status`, :meth:`~DefaultAdapter.execute_command`)
 and nothing in the generic layer needs to know the difference.
 """
@@ -271,7 +271,7 @@ class DefaultAdapter:
         """Snapshot of who is online.
 
         Besides ``player_list``, a snapshot should set ``roster_known`` to True
-        whenever the roster was read successfully — **including when it came
+        whenever the roster was read successfully - **including when it came
         back empty**. Presence uses it to tell "everyone left" apart from "we
         could not ask", and only the former may close sessions.
         """

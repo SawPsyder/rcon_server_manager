@@ -23,7 +23,7 @@ A self-hosted **web admin dashboard** for managing game servers from one place.
 - Optional Steam persona name lookup
 <!-- FEATURES:END -->
 
-Game-specific admin tools (player control, map travel, saves, etc.) depend on the server type — see below.
+Game-specific admin tools (player control, map travel, saves, etc.) depend on the server type - see below.
 
 ---
 
@@ -44,18 +44,18 @@ Connects via **Source Query + RCON** (defaults: query `27131`, RCON `27015`).
 
 Connects via the dedicated server **HTTPS API** on the game port (default `7777`). Use an admin password or API token.
 
-- Live status and player counts (no per-player roster — the game API does not expose one)
+- Live status and player counts (no per-player roster - the game API does not expose one)
 - Player-count and tick-rate history
 - Admin panel: options, advanced settings, sessions & saves, claim / rename / shutdown
 - Optional certificate fingerprint pin for self-signed TLS
 
 ### Palworld
 
-Connects via the dedicated server **REST API** (default port `8212`) — not RCON, which Pocketpair has deprecated in favour of the API. Use the server's `AdminPassword`.
+Connects via the dedicated server **REST API** (default port `8212`) - not RCON, which Pocketpair has deprecated in favour of the API. Use the server's `AdminPassword`.
 
 - Live status, player counts, and a full player roster
 - Player-count and **server FPS** history
-- Kick, ban, and unban (bans are permanent — the API takes no duration)
+- Kick, ban, and unban (bans are permanent - the API takes no duration)
 - Admin broadcast messages
 - Admin panel: per-player detail, read-only settings, world snapshot, save, graceful shutdown, force stop
 - Player history and playtime tracking, including crossplay (Steam, Xbox / Game Pass, PlayStation)
@@ -69,7 +69,7 @@ RESTAPIEnabled=True,RESTAPIPort=8212,AdminPassword="your-password"
 Two optional extras:
 
 - The **World** tab needs the server launched with `-enable-gamedata-api`; without it the tab explains how to turn it on.
-- Palworld serves **plain HTTP** and has no TLS of its own. Pocketpair warns these endpoints "are not designed to be exposed directly to the Internet" — keep port `8212` firewalled to trusted hosts. If you front it with a TLS-terminating reverse proxy, tick **Use HTTPS** on the server and optionally pin its certificate fingerprint.
+- Palworld serves **plain HTTP** and has no TLS of its own. Pocketpair warns these endpoints "are not designed to be exposed directly to the Internet" - keep port `8212` firewalled to trusted hosts. If you front it with a TLS-terminating reverse proxy, tick **Use HTTPS** on the server and optionally pin its certificate fingerprint.
 
 No ban list is shown for Palworld: the REST API has no endpoint for it, and bans live in `banlist.txt` on the server's disk.
 

@@ -25,7 +25,7 @@ function errorText(err: unknown): string {
 }
 
 function num(value: number | null | undefined, digits = 0): string {
-  return value == null ? "—" : value.toFixed(digits);
+  return value == null ? "-" : value.toFixed(digits);
 }
 
 /** Group the flat settings block so 68 keys aren't one undifferentiated wall. */
@@ -46,7 +46,7 @@ function settingsGroup(key: string): string {
 
 function settingValue(value: unknown): string {
   if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (value === "" || value == null) return "—";
+  if (value === "" || value == null) return "-";
   return String(value);
 }
 
@@ -148,7 +148,7 @@ export default function PalworldAdminPanel({ serverId, onChanged }: Props) {
   const forceStop = async () => {
     if (
       !confirm(
-        "Force stop the server immediately?\n\nThis does NOT save — everything since " +
+        "Force stop the server immediately?\n\nThis does NOT save - everything since " +
           "the last save is lost. Save the world first unless you mean to discard it."
       )
     )
@@ -237,16 +237,16 @@ export default function PalworldAdminPanel({ serverId, onChanged }: Props) {
                     <tbody>
                       {world.players.map((p) => (
                         <tr key={p.user_id || p.name}>
-                          <td>{p.name || "—"}</td>
-                          <td>{p.level ?? "—"}</td>
+                          <td>{p.name || "-"}</td>
+                          <td>{p.level ?? "-"}</td>
                           <td>
-                            {p.hp == null ? "—" : `${p.hp} / ${p.max_hp ?? "?"}`}
+                            {p.hp == null ? "-" : `${p.hp} / ${p.max_hp ?? "?"}`}
                           </td>
-                          <td className="muted">{p.guild_name || "—"}</td>
+                          <td className="muted">{p.guild_name || "-"}</td>
                           <td>{p.pal_count}</td>
                           <td className="muted">
                             {[p.location_x, p.location_y, p.location_z]
-                              .map((v) => (v == null ? "—" : v.toFixed(0)))
+                              .map((v) => (v == null ? "-" : v.toFixed(0)))
                               .join(" / ")}
                           </td>
                         </tr>
@@ -269,13 +269,13 @@ export default function PalworldAdminPanel({ serverId, onChanged }: Props) {
                     <tbody>
                       {world.base_camps.map((c, i) => (
                         <tr key={`${c.guild_id}-${i}`}>
-                          <td>{c.guild_name || "—"}</td>
+                          <td>{c.guild_name || "-"}</td>
                           <td className="muted">
-                            <code>{c.guild_id || "—"}</code>
+                            <code>{c.guild_id || "-"}</code>
                           </td>
                           <td className="muted">
                             {[c.location_x, c.location_y, c.location_z]
-                              .map((v) => (v == null ? "—" : v.toFixed(0)))
+                              .map((v) => (v == null ? "-" : v.toFixed(0)))
                               .join(" / ")}
                           </td>
                         </tr>
@@ -362,7 +362,7 @@ export default function PalworldAdminPanel({ serverId, onChanged }: Props) {
               Save world
             </button>
             <span className="muted">
-              Blocks until the world is written — expect a pause on a large save.
+              Blocks until the world is written - expect a pause on a large save.
             </span>
           </div>
 

@@ -2,7 +2,7 @@
 
 Palworld itself serves plain HTTP, so the HTTP path is the one that has to work
 out of the box. HTTPS only appears when the operator puts a reverse proxy in
-front of port 8212 — which the upstream docs effectively call for, since they
+front of port 8212 - which the upstream docs effectively call for, since they
 warn the API must not face the internet directly. Both are exercised here
 against a throwaway server rather than mocks, because the parts most likely to
 break (Content-Length on bodyless POSTs, certificate pinning) live below httpx.
@@ -122,7 +122,7 @@ def _serve(context: ssl.SSLContext | None):
 
 @pytest.fixture(scope="module")
 def http_server():
-    """(host, port) of a throwaway plain-HTTP server — Palworld's real shape."""
+    """(host, port) of a throwaway plain-HTTP server - Palworld's real shape."""
     httpd, thread = _serve(None)
     try:
         yield "127.0.0.1", httpd.server_address[1]
@@ -233,7 +233,7 @@ def test_verify_tls_rejects_the_self_signed_certificate(tls_server):
     try:
         with pytest.raises(PalworldTlsError) as exc:
             client.info()
-        # Point at the HTTPS toggle first — Palworld itself is plain HTTP
+        # Point at the HTTPS toggle first - Palworld itself is plain HTTP
         assert "plain HTTP" in str(exc.value)
     finally:
         client.close()

@@ -17,7 +17,7 @@ from pathlib import Path
 FEATURES_BEGIN = "<!-- FEATURES:BEGIN -->"
 FEATURES_END = "<!-- FEATURES:END -->"
 
-# Required top-level shape — refuse to write if these disappear
+# Required top-level shape - refuse to write if these disappear
 REQUIRED_HEADINGS = (
     "# RCON Server Manager",
     "## Features",
@@ -189,7 +189,7 @@ def update_readme_features(
     ):
         raise ReadmeError(
             "Internal error: update would change README content outside the "
-            "FEATURES markers — aborting."
+            "FEATURES markers - aborting."
         )
 
     if dry_run:

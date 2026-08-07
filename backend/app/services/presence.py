@@ -6,7 +6,7 @@ Definitions:
 - visit_count: number of times a player was picked up after not being
   present on the previous sample (re-join / new session)
 
-Rows are keyed by the net id exactly as the adapter emitted it — a bare
+Rows are keyed by the net id exactly as the adapter emitted it - a bare
 SteamID64 for Source games, a platform-prefixed id (``gdk_2535…``) for Palworld
 crossplay. ``identity.parse_net_id`` decides what counts as a real identity, so
 presence, moderation logs and the identity cache all agree on who is who.
@@ -48,7 +48,7 @@ def _remember(db: Session, identity: tuple[str, str] | None, name: str) -> None:
             ),
             source="presence",
         )
-    except Exception:  # noqa: BLE001 — never let name caching break a sample
+    except Exception:  # noqa: BLE001 - never let name caching break a sample
         pass
 
 
@@ -148,12 +148,12 @@ def update_presence(
         if session_start is None:
             # New visit: seen after absence. last_seen_at still holds the end of
             # the previous session, so capture it before the update below
-            # overwrites it — that value is otherwise gone for good.
+            # overwrites it - that value is otherwise gone for good.
             stats.previous_seen_at = stats.last_seen_at
             stats.visit_count = int(stats.visit_count or 0) + 1
             stats.session_started_at = now
         else:
-            # Still (or again) in a session — accumulate time since last tick
+            # Still (or again) in a session - accumulate time since last tick
             delta = (now - last_seen).total_seconds()
             if delta > 0:
                 delta = min(delta, max_tick_seconds)
@@ -185,7 +185,7 @@ def update_presence(
 def build_time_ranks(db: Session, server_id: int) -> dict[str, int]:
     """
     Rank all known players on this server by stored total_seconds (desc).
-    No online boost — same total as displayed. Competition ranking: 1,2,2,4.
+    No online boost - same total as displayed. Competition ranking: 1,2,2,4.
     """
     rows = (
         db.query(PlayerServerStats)
@@ -216,10 +216,10 @@ def format_ago(dt: datetime | None, now: datetime) -> str:
     ended 30 seconds ago is "just now", never "Online".
     """
     if dt is None:
-        return "—"
+        return "-"
     dt = _aware(dt)
     if dt is None:
-        return "—"
+        return "-"
     delta = (now - dt).total_seconds()
     if delta < 0:
         delta = 0
@@ -240,10 +240,10 @@ def format_ago(dt: datetime | None, now: datetime) -> str:
 def format_last_seen(dt: datetime | None, now: datetime) -> str:
     """Human-friendly last-seen label."""
     if dt is None:
-        return "—"
+        return "-"
     dt = _aware(dt)
     if dt is None:
-        return "—"
+        return "-"
     # Online right now if seen within ~2 sample intervals
     delta = (now - dt).total_seconds()
     if delta < 0:
@@ -295,9 +295,9 @@ def enrich_player_list(
                 "rank": None,
                 "ranked_players": ranked_players,
                 "last_seen_at": None,
-                "last_seen_pretty": "—",
+                "last_seen_pretty": "-",
                 "previous_seen_at": None,
-                "previous_seen_pretty": "—",
+                "previous_seen_pretty": "-",
             }
             for p in player_list
         ]
@@ -321,11 +321,11 @@ def enrich_player_list(
         visit_count = 0
         rank: int | None = ranks.get(steam) if steam else None
         last_seen_at: datetime | None = None
-        last_seen_pretty = "—"
+        last_seen_pretty = "-"
         previous_seen_at: datetime | None = None
         # Every row here is someone online, so "when were they last here before
         # now" is the only reading of last-seen that carries information.
-        previous_seen_pretty = "—"
+        previous_seen_pretty = "-"
         if stats:
             total_seconds = int(stats.total_seconds or 0)
             visit_count = int(stats.visit_count or 0)
@@ -341,7 +341,7 @@ def enrich_player_list(
             if previous_seen_at is not None:
                 previous_seen_pretty = format_ago(previous_seen_at, now)
             elif int(stats.visit_count or 0) <= 1:
-                # Never seen leaving and coming back — this is their first visit
+                # Never seen leaving and coming back - this is their first visit
                 previous_seen_pretty = "First visit"
         out.append(
             {

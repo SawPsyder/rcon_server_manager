@@ -200,7 +200,7 @@ export type PalworldBaseCamp = {
   location_z: number | null;
 };
 
-/** Server-side summary of /v1/api/game-data — the raw payload can be huge. */
+/** Server-side summary of /v1/api/game-data - the raw payload can be huge. */
 export type PalworldWorld = {
   /** False when the server was launched without -enable-gamedata-api. */
   enabled: boolean;

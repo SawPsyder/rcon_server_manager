@@ -1,7 +1,7 @@
 """Resolve platform net IDs to display names with a durable local DB cache.
 
 Lookup order for each id:
-  1. identity_cache table (always preferred — no network if name present)
+  1. identity_cache table (always preferred - no network if name present)
   2. PlayerServerStats.last_name (in-game names we've seen) → written to cache
   3. Steam Web API (if STEAM_WEB_API_KEY set) → written to cache
 
@@ -29,7 +29,7 @@ STEAM_ID_RE = re.compile(r"^\d{17}$")
 
 # Palworld reports platform-prefixed user ids (``steam_7656…``, ``gdk_2535…``).
 # The prefix is the only reliable platform signal, so it is matched *before* any
-# "find 17 digits anywhere" fallback — an Xbox id that happened to be 17 digits
+# "find 17 digits anywhere" fallback - an Xbox id that happened to be 17 digits
 # would otherwise be filed as a Steam account and sent to the Steam Web API.
 PLATFORM_PREFIXES: dict[str, str] = {
     "steam": "steam",
@@ -45,7 +45,7 @@ PREFIXED_ID_RE = re.compile(r"^([A-Za-z]{2,8})_([A-Za-z0-9._-]{4,})$")
 
 # presence keys rows on the raw net id, and PlayerServerStats.steam_id is
 # VARCHAR(32). This is a storage limit, not an identity rule, so it is enforced
-# by the caller that stores — parse_net_id stays purely about semantics.
+# by the caller that stores - parse_net_id stays purely about semantics.
 MAX_NET_ID_LENGTH = 32
 
 
@@ -137,7 +137,7 @@ def remember_identity(
         return
     platform = (platform or "unknown").strip().lower()
     # Normalize steam platform key. Only a bare SteamID64 may be *promoted* to
-    # steam — a caller that already knows the platform (xbox, psn, eos) keeps it,
+    # steam - a caller that already knows the platform (xbox, psn, eos) keeps it,
     # otherwise a Game Pass id would be filed as a Steam account.
     if platform in {"steamnwi", "steam_nwi"}:
         platform = "steam"
@@ -195,7 +195,7 @@ def resolve_names(
     steam_ids = list(dict.fromkeys(steam_by_raw.values()))
     eos_ids = list(dict.fromkeys(eos_by_raw.values()))
 
-    # 1) Local DB cache — match by external_id (any steam-like platform label)
+    # 1) Local DB cache - match by external_id (any steam-like platform label)
     steam_resolved = _load_cached_by_external_ids(db, steam_ids, prefer_platforms=("steam", "steamnwi"))
     eos_resolved = _load_cached_by_external_ids(db, eos_ids, prefer_platforms=("eos",))
 

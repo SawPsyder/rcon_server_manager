@@ -2,7 +2,7 @@
 
 A kick on a Game Pass player used to be written as ``platform='unknown'`` with
 the ``gdk_`` prefix left on the external_id, while the dossier popup looks up
-``(xbox, 2535…)`` — so the action was stored but never displayed, and the
+``(xbox, 2535…)`` - so the action was stored but never displayed, and the
 history read as empty.
 """
 

@@ -157,7 +157,7 @@ def test_bans_logged_before_net_id_existed_recover_it_from_presence(db):
 
 
 def test_an_unrecoverable_id_still_lists_rather_than_vanishing(db):
-    # Never seen online and logged before net_id — show what we know
+    # Never seen online and logged before net_id - show what we know
     _log(db, "ban", net_id="")
     rebuild_local_bans(db, 1)
     assert _entries(db)[0].raw_id == XBOX_ID

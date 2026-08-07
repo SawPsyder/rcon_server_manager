@@ -248,8 +248,8 @@ def test_existing_rows_predating_the_column_do_not_invent_a_time(db):
 
     out = enrich_player_list(db, 1, player, now=t0)[0]
     assert out["previous_seen_at"] is None
-    # Not "First visit" — we know they've been here before, just not when
-    assert out["previous_seen_pretty"] == "—"
+    # Not "First visit" - we know they've been here before, just not when
+    assert out["previous_seen_pretty"] == "-"
 
 
 # --- Sandstorm regression -------------------------------------------------

@@ -2,7 +2,7 @@
 
 Fresh installs rely on SQLAlchemy create_all. This module only patches
 older SQLite (and compatible) databases that pre-date newer columns.
-On Postgres, create_all creates the full current schema — column patches
+On Postgres, create_all creates the full current schema - column patches
 are still applied safely via information_schema when tables already exist.
 """
 
@@ -36,7 +36,7 @@ def _renormalize_unknown_identities(engine: Engine) -> None:
 
     Platform-prefixed ids (``gdk_2535…``) used to fall through to
     ``platform='unknown'`` with the prefix left on the external_id. The dossier
-    looks up ``(xbox, 2535…)``, so those rows were invisible — the moderation
+    looks up ``(xbox, 2535…)``, so those rows were invisible - the moderation
     history simply appeared empty. Neither table has a uniqueness constraint on
     the identity pair, so this is a straight update.
     """
@@ -162,7 +162,7 @@ def run_migrations(engine: Engine) -> None:
                     "WHERE roster_json IS NULL OR roster_json = ''"
                 )
             )
-        # Tick rate at sample time. Left NULL for existing rows on purpose —
+        # Tick rate at sample time. Left NULL for existing rows on purpose -
         # backfilling a zero would draw a flat line for history we never sampled.
         if dialect == "postgresql":
             _add_column(engine, "player_count_samples", "tick_rate DOUBLE PRECISION")
@@ -170,7 +170,7 @@ def run_migrations(engine: Engine) -> None:
             _add_column(engine, "player_count_samples", "tick_rate REAL")
 
     # End of the previous session, so the player table can show "last visit"
-    # while someone is online. Left NULL for existing rows on purpose — we never
+    # while someone is online. Left NULL for existing rows on purpose - we never
     # recorded it, and inventing a timestamp would read as fact.
     if _table_exists(engine, "player_server_stats"):
         if dialect == "postgresql":

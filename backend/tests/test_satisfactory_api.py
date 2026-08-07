@@ -94,7 +94,7 @@ def test_enumerate_sessions_keeps_a_zero_current_index():
 
     client = make_client(handler)
     result = client.enumerate_sessions()
-    # 0 is the first session, not "no session" — a falsy-default bug once made it -1
+    # 0 is the first session, not "no session" - a falsy-default bug once made it -1
     assert result["current_session_index"] == 0
     assert result["sessions"] == [{"sessionName": "A"}]
 

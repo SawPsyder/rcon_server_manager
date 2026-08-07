@@ -1,4 +1,4 @@
-"""Shared transport error base (leaf module — imports nothing from the app).
+"""Shared transport error base (leaf module - imports nothing from the app).
 
 Every server-type transport raises a subclass of :class:`CommandError` so the
 generic API layer can catch one type regardless of protocol (Source RCON,

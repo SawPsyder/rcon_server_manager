@@ -80,7 +80,7 @@ class RconConnectionPool:
                     return self._run_on_client(session, command, timeout)
                 except (RconError, OSError, TimeoutError) as exc:
                     logger.info(
-                        "Persistent RCON session died on %s:%s during %r: %s — reconnecting once",
+                        "Persistent RCON session died on %s:%s during %r: %s - reconnecting once",
                         host,
                         port,
                         command,
@@ -89,7 +89,7 @@ class RconConnectionPool:
                     self._discard_client(session)
                     # fall through to open a new session once
 
-            # Need a (re)connect — respect cooldown after prior open failures
+            # Need a (re)connect - respect cooldown after prior open failures
             now = time.time()
             if session.connect_blocked_until > now and session.client is None:
                 wait = int(session.connect_blocked_until - now)
@@ -105,7 +105,7 @@ class RconConnectionPool:
                 session.last_error = str(exc)
                 session.connect_blocked_until = time.time() + self.connect_cooldown_seconds
                 logger.warning(
-                    "RCON connect/auth failed for %s:%s — cooldown %.0fs: %s",
+                    "RCON connect/auth failed for %s:%s - cooldown %.0fs: %s",
                     host,
                     port,
                     self.connect_cooldown_seconds,
@@ -116,7 +116,7 @@ class RconConnectionPool:
             try:
                 return self._run_on_client(session, command, timeout)
             except (RconError, OSError, TimeoutError) as exc:
-                # Brand-new connection failed on first command — cooldown
+                # Brand-new connection failed on first command - cooldown
                 self._discard_client(session)
                 session.last_error = str(exc)
                 session.connect_blocked_until = time.time() + self.connect_cooldown_seconds

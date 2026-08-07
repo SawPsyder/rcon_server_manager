@@ -146,8 +146,8 @@ def parse_listbans(text: str) -> list[dict[str, Any]]:
                 "raw_id": raw_id,
                 "net_id": net_id,
                 "display_id": display_id,
-                "duration": duration or "—",
-                "reason": reason or "—",
+                "duration": duration or "-",
+                "reason": reason or "-",
                 "permanent": duration.lower() == "permanent" if duration else False,
             }
         )
@@ -251,7 +251,7 @@ def listplayers_via_rcon(
 ) -> list[dict[str, Any]]:
     if not password:
         raise RconError("No RCON password")
-    # Use persistent pool — never open a new TCP session per poll
+    # Use persistent pool - never open a new TCP session per poll
     from app.services.rcon import run_rcon
 
     raw = run_rcon(host, rcon_port, password, "listplayers", timeout=timeout, persistent=True)
