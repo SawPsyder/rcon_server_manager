@@ -344,6 +344,7 @@ class SandstormAdapter(DefaultAdapter):
             map_travel=True,
             structured_player_list=True,
             kick_ban=True,
+            ban_list=True,
             admin_say=True,
             a2s_query=True,
         ),
@@ -436,6 +437,9 @@ class SandstormAdapter(DefaultAdapter):
                 rcon_error = str(exc)
                 logger.info("RCON listplayers failed for %s:%s: %s", host, rcon_port, exc)
 
+        # Only a successful listplayers is a trustworthy roster. An A2S-only
+        # sample knows the count but not who, so it must not close sessions.
+        roster_known = source == "rcon"
         if source == "rcon":
             players = len(rcon_list)
             player_list = rcon_list
@@ -451,6 +455,7 @@ class SandstormAdapter(DefaultAdapter):
             "max_players": a2s_max,
             "bots": a2s_bots,
             "player_list": player_list,
+            "roster_known": roster_known,
             "source": source,
             "a2s_players": a2s_players,
             "a2s_error": a2s_error,

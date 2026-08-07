@@ -7,6 +7,8 @@ A self-hosted **web admin dashboard** for managing game servers from one place.
 **Image:** [`ghcr.io/sawpsyder/rcon_server_manager`](https://github.com/SawPsyder/rcon_server_manager/pkgs/container/rcon_server_manager)  
 **Source:** [SawPsyder/rcon_server_manager](https://github.com/SawPsyder/rcon_server_manager)
 
+![RCON Server Manager UI snapshot](sample.png)
+
 ---
 
 ## Features
@@ -46,6 +48,30 @@ Connects via the dedicated server **HTTPS API** on the game port (default `7777`
 - Player-count and tick-rate history
 - Admin panel: options, advanced settings, sessions & saves, claim / rename / shutdown
 - Optional certificate fingerprint pin for self-signed TLS
+
+### Palworld
+
+Connects via the dedicated server **REST API** (default port `8212`) — not RCON, which Pocketpair has deprecated in favour of the API. Use the server's `AdminPassword`.
+
+- Live status, player counts, and a full player roster
+- Player-count and **server FPS** history
+- Kick, ban, and unban (bans are permanent — the API takes no duration)
+- Admin broadcast messages
+- Admin panel: per-player detail, read-only settings, world snapshot, save, graceful shutdown, force stop
+- Player history and playtime tracking, including crossplay (Steam, Xbox / Game Pass, PlayStation)
+
+Enable the API in `PalWorldSettings.ini` (there is no launch argument for it) and restart the server:
+
+```ini
+RESTAPIEnabled=True,RESTAPIPort=8212,AdminPassword="your-password"
+```
+
+Two optional extras:
+
+- The **World** tab needs the server launched with `-enable-gamedata-api`; without it the tab explains how to turn it on.
+- Palworld serves **plain HTTP** and has no TLS of its own. Pocketpair warns these endpoints "are not designed to be exposed directly to the Internet" — keep port `8212` firewalled to trusted hosts. If you front it with a TLS-terminating reverse proxy, tick **Use HTTPS** on the server and optionally pin its certificate fingerprint.
+
+No ban list is shown for Palworld: the REST API has no endpoint for it, and bans live in `banlist.txt` on the server's disk.
 
 ---
 

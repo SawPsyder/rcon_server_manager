@@ -178,8 +178,10 @@ class StatsCollector:
                     )
                 )
 
-                # Presence / session tracking (humans with steam ids from RCON)
-                if snap.get("source") == "rcon" or snap.get("player_list"):
+                # Presence / session tracking. roster_known covers the case the
+                # old `source == "rcon"` check was standing in for: a roster we
+                # read successfully, even when it came back empty.
+                if snap.get("roster_known") or snap.get("player_list"):
                     try:
                         update_presence(
                             db,

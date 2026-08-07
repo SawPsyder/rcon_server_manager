@@ -19,7 +19,12 @@ from app.schemas import (
     UnbanRequest,
 )
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
-from app.services.ban_cache import load_cached_bans, remove_cached_ban, replace_server_bans
+from app.services.ban_cache import (
+    load_cached_bans,
+    rebuild_local_bans,
+    remove_cached_ban,
+    replace_server_bans,
+)
 from app.services.errors import CommandError
 from app.services.identity import steam_api_configured
 from app.services.player_records import log_player_action
@@ -129,8 +134,8 @@ def admin_say(
     _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
-    _require_feature(server, "admin_say")
-    return _exec(db, server_id, f"say {body.message.strip()}")
+    adapter = _require_feature(server, "admin_say")
+    return _exec(db, server_id, adapter.build_say_command(body.message.strip()))
 
 
 @router.post("/api/servers/{server_id}/players/kick", response_model=RconCommandResponse)
@@ -141,9 +146,11 @@ def kick_player(
     _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
-    _require_feature(server, "kick_ban")
+    adapter = _require_feature(server, "kick_ban")
     reason = body.reason.strip() or "Kicked by admin"
-    cmd = f'kick "{body.player_name}" "{reason}"'
+    cmd = adapter.build_kick_command(
+        player_name=body.player_name, net_id=body.net_id, reason=reason
+    )
     result = _exec(db, server_id, cmd)
     _log_moderation(
         db,
@@ -165,10 +172,12 @@ def ban_player(
     _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
-    _require_feature(server, "kick_ban")
+    adapter = _require_feature(server, "kick_ban")
     minutes = body.ban_minutes or 60
     reason = body.reason.strip() or "Banned by admin"
-    cmd = f'ban "{body.player_name}" "{minutes}" "{reason}"'
+    cmd = adapter.build_ban_command(
+        player_name=body.player_name, net_id=body.net_id, reason=reason, minutes=minutes
+    )
     result = _exec(db, server_id, cmd)
     _log_moderation(
         db,
@@ -191,9 +200,11 @@ def permban_player(
     _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
-    _require_feature(server, "kick_ban")
+    adapter = _require_feature(server, "kick_ban")
     reason = body.reason.strip() or "Permanently banned by admin"
-    cmd = f'permban "{body.player_name}" "{reason}"'
+    cmd = adapter.build_permban_command(
+        player_name=body.player_name, net_id=body.net_id, reason=reason
+    )
     result = _exec(db, server_id, cmd)
     _log_moderation(
         db,
@@ -216,9 +227,9 @@ def unban_player(
     _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
-    _require_feature(server, "kick_ban")
+    adapter = _require_feature(server, "kick_ban")
     net_id = body.net_id.strip()
-    result = _exec(db, server_id, f'unban "{net_id}"')
+    result = _exec(db, server_id, adapter.build_unban_command(net_id))
     _log_moderation(
         db,
         server,
@@ -270,9 +281,20 @@ def list_bans(
     for the current page only.
     """
     server = get_server_or_404(db, server_id)
-    adapter = _require_feature(server, "kick_ban")
+    adapter = _require_feature(server, "ban_list")
     page = max(1, page)
     page_size = min(100, max(1, page_size))
+
+    if adapter.info.ban_list_source == "local":
+        # Nothing live to query — rebuild from our own moderation history so a
+        # ban or unban issued elsewhere in the app is reflected immediately.
+        try:
+            rebuild_local_bans(db, server_id)
+            db.commit()
+        except Exception:
+            db.rollback()
+        cached = load_cached_bans(db, server_id, page=page, page_size=page_size)
+        return _ban_list_out(server_id, cached, from_cache=True)
 
     if not refresh:
         cached = load_cached_bans(db, server_id, page=page, page_size=page_size)

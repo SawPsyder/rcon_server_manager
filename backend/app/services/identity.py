@@ -26,6 +26,60 @@ from app.models import IdentityCache, PlayerServerStats
 logger = logging.getLogger(__name__)
 
 STEAM_ID_RE = re.compile(r"^\d{17}$")
+
+# Palworld reports platform-prefixed user ids (``steam_7656…``, ``gdk_2535…``).
+# The prefix is the only reliable platform signal, so it is matched *before* any
+# "find 17 digits anywhere" fallback — an Xbox id that happened to be 17 digits
+# would otherwise be filed as a Steam account and sent to the Steam Web API.
+PLATFORM_PREFIXES: dict[str, str] = {
+    "steam": "steam",
+    # Microsoft: Game Pass / Microsoft Store (GDK) and Xbox console
+    "gdk": "xbox",
+    "xsx": "xbox",
+    "xbl": "xbox",
+    "psn": "psn",
+    "eos": "eos",
+    "mac": "mac",
+}
+PREFIXED_ID_RE = re.compile(r"^([A-Za-z]{2,8})_([A-Za-z0-9._-]{4,})$")
+
+# presence keys rows on the raw net id, and PlayerServerStats.steam_id is
+# VARCHAR(32). This is a storage limit, not an identity rule, so it is enforced
+# by the caller that stores — parse_net_id stays purely about semantics.
+MAX_NET_ID_LENGTH = 32
+
+
+def parse_net_id(raw_id: str) -> tuple[str, str] | None:
+    """``net id`` → ``(platform, external_id)``, or ``None`` when unrecognisable.
+
+    The single source of truth for "is this a real player identity?", used by
+    presence tracking, moderation logs and the identity cache so all three agree
+    on what counts as the same person.
+    """
+    rid = (raw_id or "").strip()
+    if not rid:
+        return None
+
+    if rid.upper().startswith("STEAMNWI:"):
+        candidate = rid.split(":", 1)[1].strip()
+        return ("steam", candidate) if STEAM_ID_RE.fullmatch(candidate) else None
+    if rid.upper().startswith("EOS:"):
+        candidate = rid[4:].strip()
+        return ("eos", candidate) if candidate else None
+
+    if STEAM_ID_RE.fullmatch(rid):
+        return "steam", rid
+
+    match = PREFIXED_ID_RE.fullmatch(rid)
+    if match:
+        platform = PLATFORM_PREFIXES.get(match.group(1).lower())
+        if platform:
+            return platform, match.group(2)
+        return None
+
+    # Last resort for Source-engine strings that embed a SteamID64
+    embedded = re.search(r"(?<!\d)(\d{17})(?!\d)", rid)
+    return ("steam", embedded.group(1)) if embedded else None
 # Public Steam Web API (v0002 and v2 both work; v0002 is widely documented)
 STEAM_SUMMARIES_URLS = (
     "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/",
@@ -82,10 +136,13 @@ def remember_identity(
     if not external_id or not display_name:
         return
     platform = (platform or "unknown").strip().lower()
-    # Normalize steam platform key
-    if platform in {"steamnwi", "steam_nwi"} or STEAM_ID_RE.fullmatch(external_id):
-        if platform != "eos":
-            platform = "steam"
+    # Normalize steam platform key. Only a bare SteamID64 may be *promoted* to
+    # steam — a caller that already knows the platform (xbox, psn, eos) keeps it,
+    # otherwise a Game Pass id would be filed as a Steam account.
+    if platform in {"steamnwi", "steam_nwi"}:
+        platform = "steam"
+    elif platform in {"", "unknown"} and STEAM_ID_RE.fullmatch(external_id):
+        platform = "steam"
     _upsert_cache(
         db,
         platform=platform,

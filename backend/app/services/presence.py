@@ -5,6 +5,11 @@ Definitions:
 - total_seconds: sum of all observed presence across visits
 - visit_count: number of times a player was picked up after not being
   present on the previous sample (re-join / new session)
+
+Rows are keyed by the net id exactly as the adapter emitted it — a bare
+SteamID64 for Source games, a platform-prefixed id (``gdk_2535…``) for Palworld
+crossplay. ``identity.parse_net_id`` decides what counts as a real identity, so
+presence, moderation logs and the identity cache all agree on who is who.
 """
 
 from __future__ import annotations
@@ -15,6 +20,36 @@ from typing import Any, Iterable
 from sqlalchemy.orm import Session
 
 from app.models import PlayerServerStats
+
+
+def _remember(db: Session, identity: tuple[str, str] | None, name: str) -> None:
+    """Feed identity_cache so ban lists and dossiers never re-resolve this id.
+
+    Only Steam has a public profile URL; handing one to an Xbox or PSN id would
+    point the dossier at a Steam page that does not exist.
+    """
+    if identity is None or not name:
+        return
+    platform, external_id = identity
+    if not external_id or name == external_id:
+        return
+    try:
+        from app.services.identity import remember_identity
+
+        remember_identity(
+            db,
+            platform=platform,
+            external_id=external_id,
+            display_name=name,
+            profile_url=(
+                f"https://steamcommunity.com/profiles/{external_id}"
+                if platform == "steam"
+                else ""
+            ),
+            source="presence",
+        )
+    except Exception:  # noqa: BLE001 — never let name caching break a sample
+        pass
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -53,12 +88,22 @@ def update_presence(
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
 
+    from app.services.identity import MAX_NET_ID_LENGTH, parse_net_id
+
     current: dict[str, dict[str, Any]] = {}
+    identities: dict[str, tuple[str, str]] = {}
     for p in online_players:
-        steam = str(p.get("steamid") or "").strip()
-        if not steam or not steam.isdigit() or len(steam) != 17:
+        net_id = str(p.get("steamid") or "").strip()
+        # Rows are keyed on the raw id, so it has to fit the column. Adapters
+        # emit clean ids; anything longer is parse noise, not a player.
+        if not net_id or len(net_id) > MAX_NET_ID_LENGTH:
             continue
-        current[steam] = p
+        parsed = parse_net_id(net_id)
+        if parsed is None:
+            # Unrecognisable ids (RCON parse noise, blanks) never become rows
+            continue
+        current[net_id] = p
+        identities[net_id] = parsed
 
     # All known stats for this server (need open sessions for leave detection)
     rows = (
@@ -94,27 +139,17 @@ def update_presence(
             db.add(stats)
             by_steam[steam] = stats
             online_stats[steam] = stats
-            try:
-                from app.services.identity import remember_identity
-
-                if name and name != steam:
-                    remember_identity(
-                        db,
-                        platform="steam",
-                        external_id=steam,
-                        display_name=name,
-                        profile_url=f"https://steamcommunity.com/profiles/{steam}",
-                        source="presence",
-                    )
-            except Exception:
-                pass
+            _remember(db, identities.get(steam), name)
             continue
 
         last_seen = _aware(stats.last_seen_at) or now
         session_start = _aware(stats.session_started_at)
 
         if session_start is None:
-            # New visit: seen after absence
+            # New visit: seen after absence. last_seen_at still holds the end of
+            # the previous session, so capture it before the update below
+            # overwrites it — that value is otherwise gone for good.
+            stats.previous_seen_at = stats.last_seen_at
             stats.visit_count = int(stats.visit_count or 0) + 1
             stats.session_started_at = now
         else:
@@ -130,21 +165,7 @@ def update_presence(
             stats.last_ip = ip
         stats.last_score = score
         online_stats[steam] = stats
-        # Feed identity_cache so ban list / lookups never re-resolve this id
-        try:
-            from app.services.identity import remember_identity
-
-            if name and name != steam:
-                remember_identity(
-                    db,
-                    platform="steam",
-                    external_id=steam,
-                    display_name=name,
-                    profile_url=f"https://steamcommunity.com/profiles/{steam}",
-                    source="presence",
-                )
-        except Exception:
-            pass
+        _remember(db, identities.get(steam), name)
 
     # Close sessions for players no longer present
     for steam, stats in by_steam.items():
@@ -186,6 +207,34 @@ def build_time_ranks(db: Session, server_id: int) -> dict[str, int]:
             rank = prev_rank
         ranks[steam] = rank
     return ranks
+
+
+def format_ago(dt: datetime | None, now: datetime) -> str:
+    """Human-friendly elapsed-time label, with no "are they here now" judgement.
+
+    Kept separate from :func:`format_last_seen` because a *past* visit that
+    ended 30 seconds ago is "just now", never "Online".
+    """
+    if dt is None:
+        return "—"
+    dt = _aware(dt)
+    if dt is None:
+        return "—"
+    delta = (now - dt).total_seconds()
+    if delta < 0:
+        delta = 0
+    if delta < 90:
+        return "just now"
+    if delta < 3600:
+        mins = int(delta // 60)
+        return f"{mins}m ago"
+    if delta < 86400:
+        hours = int(delta // 3600)
+        return f"{hours}h ago"
+    days = int(delta // 86400)
+    if days < 14:
+        return f"{days}d ago"
+    return dt.strftime("%Y-%m-%d %H:%M")
 
 
 def format_last_seen(dt: datetime | None, now: datetime) -> str:
@@ -247,6 +296,8 @@ def enrich_player_list(
                 "ranked_players": ranked_players,
                 "last_seen_at": None,
                 "last_seen_pretty": "—",
+                "previous_seen_at": None,
+                "previous_seen_pretty": "—",
             }
             for p in player_list
         ]
@@ -271,6 +322,10 @@ def enrich_player_list(
         rank: int | None = ranks.get(steam) if steam else None
         last_seen_at: datetime | None = None
         last_seen_pretty = "—"
+        previous_seen_at: datetime | None = None
+        # Every row here is someone online, so "when were they last here before
+        # now" is the only reading of last-seen that carries information.
+        previous_seen_pretty = "—"
         if stats:
             total_seconds = int(stats.total_seconds or 0)
             visit_count = int(stats.visit_count or 0)
@@ -282,6 +337,12 @@ def enrich_player_list(
                 last_seen_pretty = "Online"
             else:
                 last_seen_pretty = format_last_seen(last_seen_at, now)
+            previous_seen_at = _aware(stats.previous_seen_at)
+            if previous_seen_at is not None:
+                previous_seen_pretty = format_ago(previous_seen_at, now)
+            elif int(stats.visit_count or 0) <= 1:
+                # Never seen leaving and coming back — this is their first visit
+                previous_seen_pretty = "First visit"
         out.append(
             {
                 **p,
@@ -296,6 +357,10 @@ def enrich_player_list(
                 "ranked_players": ranked_players,
                 "last_seen_at": last_seen_at.isoformat() if last_seen_at else None,
                 "last_seen_pretty": last_seen_pretty,
+                "previous_seen_at": (
+                    previous_seen_at.isoformat() if previous_seen_at else None
+                ),
+                "previous_seen_pretty": previous_seen_pretty,
             }
         )
     return out

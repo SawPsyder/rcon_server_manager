@@ -9,6 +9,7 @@ type FormState = {
   rcon_password: string;
   server_type: string;
   preferred_gamemode: string;
+  use_https: boolean;
   verify_tls: boolean;
   cert_fingerprint: string;
 };
@@ -23,6 +24,7 @@ const emptyForm = (types: ServerTypeInfo[]): FormState => {
     rcon_password: "",
     server_type: t?.id ?? "sandstorm",
     preferred_gamemode: "",
+    use_https: false,
     verify_tls: false,
     cert_fingerprint: "",
   };
@@ -96,10 +98,14 @@ export default function ServersPage() {
       // One API port for single-port games — the backend keeps both columns in sync
       const queryPort = Number(form.query_port);
       const rconPort = singlePort ? queryPort : Number(form.rcon_port);
+      // TLS settings only mean something over HTTPS; a plain-HTTP type would
+      // otherwise persist a pin that is never checked.
+      const tlsOn = !selectedType?.features.tls_optional || form.use_https;
       const options = selectedType?.features.admin_api
         ? {
-            verify_tls: form.verify_tls,
-            cert_fingerprint: form.cert_fingerprint.trim(),
+            use_https: form.use_https,
+            verify_tls: tlsOn && form.verify_tls,
+            cert_fingerprint: tlsOn ? form.cert_fingerprint.trim() : "",
           }
         : undefined;
 
@@ -152,6 +158,7 @@ export default function ServersPage() {
       rcon_password: "",
       server_type: s.server_type || "sandstorm",
       preferred_gamemode: s.preferred_gamemode || "",
+      use_https: s.options?.use_https ?? false,
       verify_tls: s.options?.verify_tls ?? false,
       cert_fingerprint: s.options?.cert_fingerprint ?? "",
     });
@@ -234,22 +241,42 @@ export default function ServersPage() {
 
           {selectedType?.features.admin_api && (
             <>
+              {/* Types that speak plain HTTP by default (Palworld) can still be
+                  reached over HTTPS through a reverse proxy. */}
+              {selectedType.features.tls_optional && (
+                <label className="full">
+                  <input
+                    type="checkbox"
+                    checked={form.use_https}
+                    onChange={(e) => setForm({ ...form, use_https: e.target.checked })}
+                  />{" "}
+                  Use HTTPS
+                  <small className="muted">
+                    {selectedType.label} serves plain HTTP. Turn this on only if the
+                    API sits behind a TLS-terminating reverse proxy.
+                  </small>
+                </label>
+              )}
               <label className="full">
                 <input
                   type="checkbox"
                   checked={form.verify_tls}
+                  disabled={selectedType.features.tls_optional && !form.use_https}
                   onChange={(e) => setForm({ ...form, verify_tls: e.target.checked })}
                 />{" "}
                 Verify TLS certificate
                 <small className="muted">
-                  {selectedType.label} serves a self-signed certificate unless you
-                  installed your own, so leave this off and pin the fingerprint instead.
+                  {selectedType.features.tls_optional
+                    ? "Only applies over HTTPS."
+                    : `${selectedType.label} serves a self-signed certificate unless you
+                       installed your own, so leave this off and pin the fingerprint instead.`}
                 </small>
               </label>
               <label className="full">
                 Pinned certificate fingerprint (SHA-256, optional)
                 <input
                   value={form.cert_fingerprint}
+                  disabled={selectedType.features.tls_optional && !form.use_https}
                   onChange={(e) =>
                     setForm({ ...form, cert_fingerprint: e.target.value })
                   }

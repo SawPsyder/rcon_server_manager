@@ -21,8 +21,13 @@ const RANGES: { value: StatsRange; label: string }[] = [
 
 const DEFAULT_REFRESH_MS = 60_000;
 
-/** What a healthy Satisfactory server simulates at. Dips below mean load. */
-const TARGET_TICK_RATE = 30;
+// What the series means differs per game — Satisfactory reports simulation
+// ticks against a 30/s target, Palworld reports server FPS against 60. The
+// defaults are Satisfactory's, so callers that pass nothing render as before.
+const DEFAULT_LABEL = "Tick rate";
+const DEFAULT_UNIT = "tps";
+/** What a healthy server simulates at. Dips below mean load. */
+const DEFAULT_TARGET = 30;
 
 /** The app's secondary accent — the player chart owns amber. */
 const LINE = "#3d8bfd";
@@ -35,6 +40,12 @@ type Props = {
   refreshMs?: number;
   /** Override chart plot height in px. */
   height?: number;
+  /** Section heading, e.g. "Server FPS" (default "Tick rate"). */
+  label?: string;
+  /** Unit shown in the tooltip and target line (default "tps"). */
+  unit?: string;
+  /** Healthy value, drawn as the reference line (default 30). */
+  target?: number;
 };
 
 type ChartPoint = {
@@ -64,10 +75,14 @@ function TickTooltip({
   active,
   payload,
   label,
+  target = DEFAULT_TARGET,
+  unit = DEFAULT_UNIT,
 }: {
   active?: boolean;
   payload?: Array<{ payload?: ChartPoint }>;
   label?: string;
+  target?: number;
+  unit?: string;
 }) {
   if (!active || !payload?.length) return null;
   const point = payload[0]?.payload;
@@ -92,7 +107,9 @@ function TickTooltip({
           ) : (
             <>
               <strong>{point.tick.toFixed(1)}</strong>
-              <span className="chart-tooltip-max">/{TARGET_TICK_RATE} tps</span>
+              <span className="chart-tooltip-max">
+                /{target} {unit}
+              </span>
             </>
           )}
         </div>
@@ -105,6 +122,9 @@ export default function TickRateChart({
   serverId,
   refreshMs = DEFAULT_REFRESH_MS,
   height,
+  label = DEFAULT_LABEL,
+  unit = DEFAULT_UNIT,
+  target = DEFAULT_TARGET,
 }: Props) {
   const [range, setRange] = useState<StatsRange>("24h");
   const [stats, setStats] = useState<PlayerStats | null>(null);
@@ -152,7 +172,7 @@ export default function TickRateChart({
     <section className="card chart-card">
       <div className="row between wrap" style={{ alignItems: "center" }}>
         <div className="row wrap" style={{ alignItems: "center", gap: "0.6rem" }}>
-          <h2 style={{ margin: 0, fontSize: "1rem" }}>Tick rate</h2>
+          <h2 style={{ margin: 0, fontSize: "1rem" }}>{label}</h2>
           <div className="chart-summary row wrap">
             <span className="chip">
               Latest: <strong>{stats?.current_tick_rate ?? "—"}</strong>
@@ -168,7 +188,7 @@ export default function TickRateChart({
         <div
           className="range-tabs"
           role="tablist"
-          aria-label="Tick rate timespan"
+          aria-label={`${label} timespan`}
           onClick={stopRowClick}
           onKeyDown={stopRowClick}
         >
@@ -199,7 +219,7 @@ export default function TickRateChart({
       <div className="chart-wrap" style={{ minHeight: chartHeight }}>
         {!hasReadings ? (
           <div className="chart-empty muted" style={{ minHeight: chartHeight }}>
-            {loading ? "Loading…" : "No tick-rate readings in this range yet"}
+            {loading ? "Loading…" : `No ${label.toLowerCase()} readings in this range yet`}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={chartHeight}>
@@ -218,22 +238,21 @@ export default function TickRateChart({
                 tick={{ fill: AXIS, fontSize: 11 }}
                 domain={[
                   0,
-                  (dataMax: number) =>
-                    Math.max(TARGET_TICK_RATE, Math.ceil(dataMax || 0)),
+                  (dataMax: number) => Math.max(target, Math.ceil(dataMax || 0)),
                 ]}
               />
               <Tooltip
-                content={<TickTooltip />}
+                content={<TickTooltip target={target} unit={unit} />}
                 cursor={{ stroke: LINE, strokeWidth: 1, strokeOpacity: 0.45 }}
               />
               {/* Target, not a series: recessive and labelled in axis ink */}
               <ReferenceLine
-                y={TARGET_TICK_RATE}
+                y={target}
                 stroke={AXIS}
                 strokeDasharray="4 4"
                 strokeOpacity={0.6}
                 label={{
-                  value: `${TARGET_TICK_RATE} tps target`,
+                  value: `${target} ${unit} target`,
                   position: "insideTopRight",
                   fill: AXIS,
                   fontSize: 11,

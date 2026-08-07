@@ -1,7 +1,11 @@
 export type ServerFeatures = {
   map_travel: boolean;
   structured_player_list: boolean;
+  /** The game reports a per-player score, so the Score column means something. */
+  player_score: boolean;
   kick_ban: boolean;
+  /** The transport can enumerate existing bans (Palworld can ban but not list). */
+  ban_list: boolean;
   admin_say: boolean;
   a2s_query: boolean;
   /** Game-specific admin panel is available for this type. */
@@ -10,6 +14,8 @@ export type ServerFeatures = {
   console: boolean;
   /** Samples carry a tick rate, so the tick-rate history chart has data. */
   tick_rate_history: boolean;
+  /** HTTP or HTTPS both possible (reverse proxy), so offer the scheme toggle. */
+  tls_optional: boolean;
 };
 
 export type QuickButton = {
@@ -28,10 +34,18 @@ export type ServerTypeInfo = {
   secret_label: string;
   /** "query_rcon" = separate ports; "single_port" = one API port. */
   endpoint_style: "query_rcon" | "single_port" | string;
+  /** "live" = queried from the server; "local" = derived from our own history. */
+  ban_list_source: "live" | "local" | string;
+  /** How the tick_rate series reads for this game (Source ticks vs server FPS). */
+  tick_rate_label: string;
+  tick_rate_unit: string;
+  tick_rate_target: number;
 };
 
 /** Per-server connection extras (servers.options_json). */
 export type ServerOptions = {
+  /** Only meaningful for types that advertise features.tls_optional. */
+  use_https: boolean;
   verify_tls: boolean;
   cert_fingerprint: string;
 };
@@ -74,8 +88,13 @@ export type PlayerInfo = {
   ranked_players?: number;
   last_seen_at?: string | null;
   last_seen_pretty?: string;
+  /** End of the session before the current one ("3d ago" / "First visit"). */
+  previous_seen_at?: string | null;
+  previous_seen_pretty?: string;
   duration: number;
   duration_pretty: string;
+  /** Game-specific per-player scalars, rendered as extra columns. */
+  extra?: Record<string, string | number | boolean | null> | null;
 };
 
 export type ServerStatus = {
@@ -156,6 +175,45 @@ export type SatisfactorySessions = {
 };
 
 export type SatisfactoryAction = {
+  ok: boolean;
+  detail: string;
+};
+
+export type PalworldWorldPlayer = {
+  name: string;
+  user_id: string;
+  level: number | null;
+  hp: number | null;
+  max_hp: number | null;
+  guild_name: string;
+  location_x: number | null;
+  location_y: number | null;
+  location_z: number | null;
+  pal_count: number;
+};
+
+export type PalworldBaseCamp = {
+  guild_name: string;
+  guild_id: string;
+  location_x: number | null;
+  location_y: number | null;
+  location_z: number | null;
+};
+
+/** Server-side summary of /v1/api/game-data — the raw payload can be huge. */
+export type PalworldWorld = {
+  /** False when the server was launched without -enable-gamedata-api. */
+  enabled: boolean;
+  hint: string;
+  snapshot_time: string;
+  fps: number | null;
+  average_fps: number | null;
+  actor_counts: Record<string, number>;
+  players: PalworldWorldPlayer[];
+  base_camps: PalworldBaseCamp[];
+};
+
+export type PalworldAction = {
   ok: boolean;
   detail: string;
 };
@@ -246,6 +304,17 @@ export type IdentityDossier = {
 };
 
 /** Normalize net id to platform + external_id for identity APIs. */
+/** Palworld reports platform-prefixed user ids; mirrors identity.PLATFORM_PREFIXES. */
+const PLATFORM_PREFIXES: Record<string, string> = {
+  steam: "steam",
+  gdk: "xbox", // Game Pass / Microsoft Store
+  xsx: "xbox",
+  xbl: "xbox",
+  psn: "psn",
+  eos: "eos",
+  mac: "mac",
+};
+
 export function parseIdentity(netId: string): { platform: string; external_id: string } | null {
   const raw = (netId || "").trim();
   if (!raw) return null;
@@ -253,6 +322,15 @@ export function parseIdentity(netId: string): { platform: string; external_id: s
   if (steamNwi) return { platform: "steam", external_id: steamNwi[1] };
   if (/^\d{17}$/.test(raw)) return { platform: "steam", external_id: raw };
   if (/^EOS:/i.test(raw)) return { platform: "eos", external_id: raw.slice(4) };
+
+  // Before the loose 17-digit search below: an Xbox id that happens to be 17
+  // digits must not be filed as a Steam account and sent to the Steam Web API.
+  const prefixed = raw.match(/^([A-Za-z]{2,8})_([A-Za-z0-9._-]{4,})$/);
+  if (prefixed) {
+    const platform = PLATFORM_PREFIXES[prefixed[1].toLowerCase()];
+    if (platform) return { platform, external_id: prefixed[2] };
+  }
+
   const anySteam = raw.match(/(\d{17})/);
   if (anySteam) return { platform: "steam", external_id: anySteam[1] };
   return { platform: "unknown", external_id: raw };
@@ -597,6 +675,35 @@ export const api = {
       }),
     shutdown: (id: number) =>
       request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/shutdown`, {
+        method: "POST",
+        body: JSON.stringify({ confirm: true }),
+      }),
+  },
+
+  /** Palworld REST API passthrough (only for types with features.admin_api). */
+  palworld: {
+    // No info/metrics/players bindings: those reach the page through
+    // ServerStatus.extra and PlayerInfo.extra, so the panel never calls the
+    // passthrough routes. They stay served for anything scripting the API.
+    settings: (id: number) =>
+      request<{ settings: Record<string, string | number | boolean> }>(
+        `/api/servers/${id}/palworld/settings`
+      ),
+    world: (id: number) => request<PalworldWorld>(`/api/servers/${id}/palworld/world`),
+    announce: (id: number, message: string) =>
+      request<PalworldAction>(`/api/servers/${id}/palworld/announce`, {
+        method: "POST",
+        body: JSON.stringify({ message }),
+      }),
+    save: (id: number) =>
+      request<PalworldAction>(`/api/servers/${id}/palworld/save`, { method: "POST" }),
+    shutdown: (id: number, waittime: number, message: string) =>
+      request<PalworldAction>(`/api/servers/${id}/palworld/shutdown`, {
+        method: "POST",
+        body: JSON.stringify({ waittime, message, confirm: true }),
+      }),
+    stop: (id: number) =>
+      request<PalworldAction>(`/api/servers/${id}/palworld/stop`, {
         method: "POST",
         body: JSON.stringify({ confirm: true }),
       }),

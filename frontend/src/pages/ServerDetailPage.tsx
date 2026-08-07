@@ -17,8 +17,27 @@ import IdentityDossierModal from "../components/IdentityDossierModal";
 import IdentityInfoButton from "../components/IdentityInfoButton";
 import PlayerStatsChart from "../components/PlayerStatsChart";
 import TickRateChart from "../components/TickRateChart";
+import PalworldAdminPanel from "../components/PalworldAdminPanel";
 import SatisfactoryAdminPanel from "../components/SatisfactoryAdminPanel";
 import { overviewBackSearch } from "./OverviewPage";
+
+type AdminPanelProps = { serverId: number; onChanged?: () => void };
+
+/** Which admin panel a type gets. features.admin_api only says one exists. */
+const ADMIN_PANELS: Record<string, React.ComponentType<AdminPanelProps>> = {
+  satisfactory: SatisfactoryAdminPanel,
+  palworld: PalworldAdminPanel,
+};
+
+/** snake_case PlayerInfo.extra keys → readable column headers. */
+function playerExtraLabel(key: string): string {
+  const known: Record<string, string> = {
+    account_name: "Account",
+    level: "Level",
+    ping_ms: "Ping (ms)",
+  };
+  return known[key] || key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
 
 /** snake_case status extras → readable stat labels. */
 function extraStatLabel(key: string): string {
@@ -31,6 +50,14 @@ function extraStatLabel(key: string): string {
     is_game_running: "Game running",
     is_game_paused: "Paused",
     auto_load_session_name: "Auto-load",
+    // Palworld (/v1/api/metrics + /info)
+    version: "Version",
+    server_fps: "Server FPS",
+    frame_time_ms: "Frame time (ms)",
+    uptime: "Uptime",
+    in_game_days: "In-game days",
+    base_camps: "Base camps",
+    world_guid: "World GUID",
   };
   if (known[key]) return known[key];
   return key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
@@ -120,16 +147,42 @@ export default function ServerDetailPage() {
     const defaults = {
       map_travel: false,
       structured_player_list: false,
+      player_score: true,
       kick_ban: false,
+      ban_list: false,
       admin_say: false,
       a2s_query: true,
       admin_api: false,
       console: true,
       tick_rate_history: false,
+      tls_optional: false,
     };
     const fromType = serverTypes.find((t) => t.id === serverType)?.features;
     return { ...defaults, ...fromType, ...status?.features };
   }, [serverTypes, serverType, status?.features]);
+  const AdminPanel = features.admin_api ? ADMIN_PANELS[serverType] : undefined;
+  const banListSource =
+    serverTypes.find((t) => t.id === serverType)?.ban_list_source || "live";
+  /** Per-game naming for the tick_rate series (Source ticks vs server FPS). */
+  const tickRate = useMemo(() => {
+    const t = serverTypes.find((x) => x.id === serverType);
+    return {
+      label: t?.tick_rate_label || "Tick rate",
+      unit: t?.tick_rate_unit || "tps",
+      target: t?.tick_rate_target || 30,
+    };
+  }, [serverTypes, serverType]);
+  /** Game-specific per-player columns, in the order the adapter emitted them.
+   *  Union across rows so a field only some players report still gets a column. */
+  const playerExtraKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const p of status?.player_list || []) {
+      for (const key of Object.keys(p.extra || {})) {
+        if (!keys.includes(key)) keys.push(key);
+      }
+    }
+    return keys;
+  }, [status?.player_list]);
   /** Game-specific status scalars (tick rate, tech tier, ...) as stat cards. */
   const extraStats = useMemo(
     () => Object.entries(status?.extra || {}).filter(([, v]) => v !== null && v !== ""),
@@ -479,13 +532,17 @@ export default function ServerDetailPage() {
           <div className="stat-label">Hostname</div>
           <div className="stat-value">{status?.hostname || "—"}</div>
         </div>
-        <div className="stat card">
-          <div className="stat-label">Map</div>
-          <div className="stat-value">
-            {status?.map || "—"}
-            {status?.lighting ? ` (${status.lighting})` : ""}
+        {/* Conditional like Gamemode below: games with a single world report no
+            map at all (Palworld), and an always-empty card is just noise. */}
+        {(status?.map || status?.lighting) && (
+          <div className="stat card">
+            <div className="stat-label">Map</div>
+            <div className="stat-value">
+              {status?.map || "—"}
+              {status?.lighting ? ` (${status.lighting})` : ""}
+            </div>
           </div>
-        </div>
+        )}
         <div className="stat card">
           <div className="stat-label">Players</div>
           <div className="stat-value">
@@ -516,7 +573,12 @@ export default function ServerDetailPage() {
       {/* Separate chart, not a second axis on the player one — tick rate and
           player count share no scale. */}
       {features.tick_rate_history && validServerId && (
-        <TickRateChart serverId={validServerId} />
+        <TickRateChart
+          serverId={validServerId}
+          label={tickRate.label}
+          unit={tickRate.unit}
+          target={tickRate.target}
+        />
       )}
 
       {/* Hidden only for games that expose no per-player data at all
@@ -531,9 +593,15 @@ export default function ServerDetailPage() {
                 <th title="Place by total time on this server (x/y = rank / tracked players)">
                   Rank
                 </th>
-                <th title="In-game server slot / list ID">#</th>
                 <th title="Player display name from the server">Name</th>
-                <th title="Current in-game score">Score</th>
+                {features.player_score && (
+                  <th title="Current in-game score">Score</th>
+                )}
+                {playerExtraKeys.map((key) => (
+                  <th key={key} title={playerExtraLabel(key)}>
+                    {playerExtraLabel(key)}
+                  </th>
+                ))}
                 <th title="Time in the current continuous join (this session)">
                   Session
                 </th>
@@ -541,17 +609,26 @@ export default function ServerDetailPage() {
                 <th title="Times seen after being absent from a sample (re-joins)">
                   Visits
                 </th>
-                <th title="End of last session, or Online if currently present">
-                  Last seen
+                {/* Everyone listed here is online, so "last seen" would read
+                    "Online" on every row — show when they were previously on. */}
+                <th title="End of the player's previous session, before this one">
+                  Last visit
                 </th>
-                <th title="Last known IP address from RCON">IP</th>
-                <th title="SteamID64">Steam ID</th>
+                <th title="Last known IP address reported by the server">IP</th>
+                {/* Not always a SteamID64: crossplay games report platform-
+                    prefixed ids such as gdk_… (Xbox) or psn_… */}
+                <th title="Platform account id used by kick, ban and unban">
+                  Player ID
+                </th>
               </tr>
             </thead>
             <tbody>
               {(status?.player_list || []).length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="muted">
+                  <td
+                    colSpan={8 + (features.player_score ? 1 : 0) + playerExtraKeys.length}
+                    className="muted"
+                  >
                     No players reported
                   </td>
                 </tr>
@@ -576,7 +653,6 @@ export default function ServerDetailPage() {
                           : "—"}
                       </span>
                     </td>
-                    <td>{p.id}</td>
                     <td>
                       <span className="name-with-info">
                         <span>{p.name}</span>
@@ -595,12 +671,15 @@ export default function ServerDetailPage() {
                         ) : null}
                       </span>
                     </td>
-                    <td>{p.score}</td>
+                    {features.player_score && <td>{p.score}</td>}
+                    {playerExtraKeys.map((key) => (
+                      <td key={key}>{formatExtraStat(p.extra?.[key] ?? null)}</td>
+                    ))}
                     <td>{p.session_pretty || "0s"}</td>
                     <td>{p.total_pretty || "0s"}</td>
                     <td>{p.visit_count ?? 0}</td>
-                    <td title={p.last_seen_at || undefined}>
-                      {p.last_seen_pretty || "—"}
+                    <td title={p.previous_seen_at || undefined}>
+                      {p.previous_seen_pretty || "—"}
                     </td>
                     <td>
                       <code className="steam-id">{p.ip || "—"}</code>
@@ -784,8 +863,8 @@ export default function ServerDetailPage() {
         </section>
       )}
 
-      {features.admin_api && validServerId && (
-        <SatisfactoryAdminPanel serverId={validServerId} onChanged={refreshStatus} />
+      {AdminPanel && validServerId && (
+        <AdminPanel serverId={validServerId} onChanged={refreshStatus} />
       )}
 
       {features.console && (
@@ -866,7 +945,9 @@ export default function ServerDetailPage() {
       </section>
       )}
 
-      {features.kick_ban && (
+      {/* kick_ban alone isn't enough: Palworld can ban but its REST API has no
+          way to enumerate bans (they live in banlist.txt on the server's disk). */}
+      {features.ban_list && (
         <BanListPanel
           bans={bans}
           loading={bansLoading}
@@ -875,6 +956,7 @@ export default function ServerDetailPage() {
           steamLookupEnabled={steamLookupEnabled}
           fromCache={bansFromCache}
           fetchedAt={bansFetchedAt}
+          source={banListSource}
           page={bansPage}
           pageSize={bansPageSize}
           total={bansTotal}

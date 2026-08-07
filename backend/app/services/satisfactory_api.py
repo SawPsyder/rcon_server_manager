@@ -27,12 +27,9 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import json
 import logging
 import re
-import socket
-import ssl
 import threading
 import time
 from dataclasses import dataclass, field
@@ -41,6 +38,13 @@ from typing import Any, Mapping
 import httpx
 
 from app.services.errors import CommandError
+from app.services.tls_pins import (
+    CertFetchError,
+    format_fingerprint,
+    normalize_fingerprint,
+    pin_mismatch_message,
+)
+from app.services.tls_pins import fetch_cert_fingerprint as _fetch_cert_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -111,17 +115,6 @@ def pick(data: Any, name: str, default: Any = None) -> Any:
     return default
 
 
-def normalize_fingerprint(value: str) -> str:
-    """Strip colons/spaces/0x and lowercase, so pasted formats all compare equal."""
-    return re.sub(r"[^0-9a-f]", "", (value or "").lower())
-
-
-def format_fingerprint(digest: str) -> str:
-    """Group a hex digest in colon-separated pairs for display."""
-    clean = normalize_fingerprint(digest)
-    return ":".join(clean[i : i + 2] for i in range(0, len(clean), 2))
-
-
 def fetch_cert_fingerprint(host: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> str:
     """SHA-256 of the server's presented certificate (DER), as lowercase hex.
 
@@ -129,21 +122,13 @@ def fetch_cert_fingerprint(host: str, port: int, timeout: float = DEFAULT_TIMEOU
     error — "certificate problem" would send the operator chasing the wrong fix.
     """
     try:
-        pem = ssl.get_server_certificate((host, int(port)), timeout=timeout)
-        der = ssl.PEM_cert_to_DER_cert(pem)
-    except ssl.SSLError as exc:
-        raise SatisfactoryTlsError(
-            f"TLS handshake with {host}:{port} failed while reading its certificate: {exc}"
-        ) from exc
-    except (TimeoutError, socket.timeout) as exc:
-        raise SatisfactoryTimeoutError(
-            f"Timed out reading the TLS certificate of {host}:{port}"
-        ) from exc
-    except OSError as exc:
-        raise SatisfactoryApiError(
-            f"Could not connect to {host}:{port}: {exc}"
-        ) from exc
-    return hashlib.sha256(der).hexdigest()
+        return _fetch_cert_fingerprint(host, port, timeout)
+    except CertFetchError as exc:
+        if exc.kind == "tls":
+            raise SatisfactoryTlsError(str(exc)) from exc
+        if exc.kind == "timeout":
+            raise SatisfactoryTimeoutError(str(exc)) from exc
+        raise SatisfactoryApiError(str(exc)) from exc
 
 
 @dataclass(frozen=True)
@@ -235,9 +220,9 @@ class SatisfactoryClient:
         observed = fetch_cert_fingerprint(self.endpoint.host, self.endpoint.port, self.timeout)
         if observed != expected:
             raise SatisfactoryTlsError(
-                f"Certificate fingerprint mismatch for {self.endpoint.host}:"
-                f"{self.endpoint.port} — expected {format_fingerprint(expected)}, "
-                f"server presented {format_fingerprint(observed)}",
+                pin_mismatch_message(
+                    self.endpoint.host, self.endpoint.port, expected, observed
+                ),
                 observed_fingerprint=observed,
             )
 

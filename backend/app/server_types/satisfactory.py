@@ -331,6 +331,8 @@ class SatisfactoryAdapter(DefaultAdapter):
             "max_players": 0,
             "bots": 0,
             "player_list": [],
+            # The API exposes no roster at all, so presence never engages
+            "roster_known": False,
             "source": "offline",
             "a2s_players": 0,
             "a2s_error": None,

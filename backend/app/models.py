@@ -131,6 +131,11 @@ class PlayerServerStats(Base):
     visit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Non-null while currently online on this server
     session_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # End of the session *before* the current one, captured when a new visit
+    # starts. last_seen_at is overwritten every sample, so without this the
+    # previous leave time is lost the moment a player re-joins. Null until a
+    # player has been seen leaving and coming back at least once.
+    previous_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_ip: Mapped[str] = mapped_column(String(64), default="")
     last_score: Mapped[int] = mapped_column(Integer, default=0)
 
@@ -257,6 +262,10 @@ class PlayerActionLog(Base):
     )
     server_name: Mapped[str] = mapped_column(String(255), default="")
     player_name: Mapped[str] = mapped_column(String(255), default="")
+    # The id exactly as sent to the game server. (platform, external_id) is
+    # canonical but lossy — gdk_ and xsx_ both normalise to "xbox", and
+    # Palworld's /unban needs the original string back.
+    net_id: Mapped[str] = mapped_column(String(64), default="")
     reason: Mapped[str] = mapped_column(Text, default="")
     # e.g. ban duration minutes
     detail: Mapped[str] = mapped_column(String(255), default="")
