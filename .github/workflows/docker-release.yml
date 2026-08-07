@@ -51,7 +51,7 @@ jobs:
           set -euo pipefail
           git fetch origin master:refs/remotes/origin/master || git fetch origin main:refs/remotes/origin/master
           if git merge-base --is-ancestor HEAD origin/master; then
-            echo "Tag commit is on master — OK"
+            echo "Tag commit is on master - OK"
           else
             echo "::error::Release tags must be created on a commit that is on the master branch."
             echo "Current HEAD is not an ancestor of origin/master."
@@ -98,7 +98,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Optional :latest — retry a few times if GHCR secondary rate limit hits.
+      # Optional :latest - retry a few times if GHCR secondary rate limit hits.
       - name: Push latest tag
         if: ${{ !contains(github.ref_name, '-') }}
         shell: bash

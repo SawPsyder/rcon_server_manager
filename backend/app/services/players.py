@@ -1,4 +1,4 @@
-"""Player sampling dispatcher — routes to the server type adapter."""
+"""Player sampling dispatcher - routes to the server type adapter."""
 
 from __future__ import annotations
 

@@ -170,7 +170,7 @@ export default function SettingsPage() {
                 <ul className="muted" style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem" }}>
                   {t.quick_buttons.map((b) => (
                     <li key={b.command}>
-                      <strong>{b.label}</strong> — <code>{b.command}</code>
+                      <strong>{b.label}</strong> - <code>{b.command}</code>
                     </li>
                   ))}
                 </ul>

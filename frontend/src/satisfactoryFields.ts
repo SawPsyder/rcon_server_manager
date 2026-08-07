@@ -39,7 +39,7 @@ export type FieldSpec =
 export const CUSTOM_CHOICE = "\u0000custom";
 
 const UNKNOWN_HELP =
-  "Not in this app's catalogue — the control was chosen from the value the server reported.";
+  "Not in this app's catalogue - the control was chosen from the value the server reported.";
 
 function numberedChoices(
   from: number,
@@ -52,7 +52,7 @@ function numberedChoices(
 }
 
 /**
- * `GetServerOptions` / `ApplyServerOptions` — values are always strings.
+ * `GetServerOptions` / `ApplyServerOptions` - values are always strings.
  *
  * The set below matches what a 1.x server actually reports, which is not quite
  * what the community docs list: the API exposes `FG.EnableSeasonalEvents`
@@ -84,16 +84,16 @@ export const SERVER_OPTION_FIELDS: Record<string, FieldSpec> = {
     label: "Restart time slot",
     step: 1,
     unit: "minutes",
-    help: "Restart schedule in minutes. Servers ship with 1440 — once every 24 h.",
+    help: "Restart schedule in minutes. Servers ship with 1440 - once every 24 h.",
   },
   "FG.NetworkQuality": {
     kind: "enum",
     label: "Network quality",
     choices: [
-      { value: "0", label: "0 — Low" },
-      { value: "1", label: "1 — Medium" },
-      { value: "2", label: "2 — High" },
-      { value: "3", label: "3 — Ultra" },
+      { value: "0", label: "0 - Low" },
+      { value: "1", label: "1 - Medium" },
+      { value: "2", label: "2 - High" },
+      { value: "3", label: "3 - Ultra" },
     ],
     help: "Dedicated servers default to Low; connected clients should match this.",
   },
@@ -128,7 +128,7 @@ export const SERVER_OPTION_FIELDS: Record<string, FieldSpec> = {
  * `GetAdvancedGameSettings` / `ApplyAdvancedGameSettings`.
  *
  * Every key here was read back off a running 1.x server, which reports all of
- * them as strings (`"False"`, `"2"`, `"Empty"`) even for the toggles — hence
+ * them as strings (`"False"`, `"2"`, `"Empty"`) even for the toggles - hence
  * the format-preserving writes.
  */
 export const ADVANCED_SETTING_FIELDS: Record<string, FieldSpec> = {
@@ -202,7 +202,7 @@ export const ADVANCED_SETTING_FIELDS: Record<string, FieldSpec> = {
   },
 };
 
-/** `CreateNewGame` starting locations — the four spawn areas in 1.x. */
+/** `CreateNewGame` starting locations - the four spawn areas in 1.x. */
 export const STARTING_LOCATIONS: SelectChoice[] = [
   { value: "", label: "Random (let the server pick)" },
   { value: "Grass Fields", label: "Grass Fields" },
@@ -239,7 +239,7 @@ function looksNumeric(raw: unknown): boolean {
 }
 
 /**
- * Turn `FG.GameRules.NoBuildCost` into `No build cost` — sentence case, so a
+ * Turn `FG.GameRules.NoBuildCost` into `No build cost` - sentence case, so a
  * key the catalogue does not know still reads like the labels next to it.
  * All-caps words are left alone (`FG.DSAutoPause` → `DS auto pause`).
  */

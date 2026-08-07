@@ -181,7 +181,7 @@ export default function OverviewPage() {
                 </div>
                 <div className="row wrap" style={{ gap: "0.5rem", alignItems: "center" }}>
                   <span className="chip">
-                    {s.last_players ?? "—"}/{s.last_max_players ?? "—"}
+                    {s.last_players ?? "-"}/{s.last_max_players ?? "-"}
                   </span>
                   <div className={`pill ${s.last_online ? "online" : "offline"}`}>
                     {s.last_online ? "ONLINE" : "OFFLINE"}

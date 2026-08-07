@@ -4,7 +4,7 @@ Release helper for RCON Server Manager.
 
 Typical flow (from a clean working tree):
 
-  # Inspect only — safe, no side effects
+  # Inspect only - safe, no side effects
   python scripts/release.py analyse
   python scripts/release.py analyse --bump minor
 

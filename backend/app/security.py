@@ -114,7 +114,7 @@ def _fernet_candidates() -> list[bytes]:
             except OSError as exc:
                 logger.warning("Could not write encryption key file: %s", exc)
 
-    # 3) Legacy derive-from-SECRET_KEY (older builds) — always valid
+    # 3) Legacy derive-from-SECRET_KEY (older builds) - always valid
     digest = hashlib.sha256(settings.secret_key.encode("utf-8")).digest()
     legacy = base64.urlsafe_b64encode(digest)
     if legacy not in keys:
@@ -126,7 +126,7 @@ def _fernet_candidates() -> list[bytes]:
 def _fernet() -> Fernet:
     candidates = _fernet_candidates()
     if not candidates:
-        # Absolute fallback (ephemeral — avoid if possible)
+        # Absolute fallback (ephemeral - avoid if possible)
         logger.error("No Fernet key material available; using ephemeral key")
         return Fernet(Fernet.generate_key())
     return Fernet(candidates[0])

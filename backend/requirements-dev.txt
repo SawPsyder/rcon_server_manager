@@ -1,4 +1,4 @@
-# Development / CI only — not installed into the Docker image
+# Development / CI only - not installed into the Docker image
 -r requirements.txt
 
 pytest==8.3.4

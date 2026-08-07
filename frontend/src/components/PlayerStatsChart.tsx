@@ -247,13 +247,13 @@ export default function PlayerStatsChart({
       <div className="row between wrap" style={{ alignItems: "center" }}>
         <div className="chart-summary row wrap">
           <span className="chip">
-            Peak: <strong>{stats?.peak_players ?? "—"}</strong>
+            Peak: <strong>{stats?.peak_players ?? "-"}</strong>
           </span>
           <span className="chip">
-            Avg: <strong>{stats?.avg_players ?? "—"}</strong>
+            Avg: <strong>{stats?.avg_players ?? "-"}</strong>
           </span>
           <span className="chip">
-            Latest: <strong>{stats?.current_players ?? "—"}</strong>
+            Latest: <strong>{stats?.current_players ?? "-"}</strong>
           </span>
         </div>
         <div className="row wrap" style={{ alignItems: "center", gap: "0.5rem" }}>

@@ -23,6 +23,7 @@ router = APIRouter(prefix="/api/servers", tags=["servers"])
 def _options_out(server: Server) -> ServerOptionsOut:
     options = load_options(server)
     return ServerOptionsOut(
+        use_https=bool(options.get("use_https", False)),
         verify_tls=bool(options.get("verify_tls", False)),
         cert_fingerprint=str(options.get("cert_fingerprint", "") or ""),
     )
@@ -72,7 +73,7 @@ def _apply_options(server: Server, options) -> None:
         return
     updates = options.model_dump(exclude_unset=True)
     if "cert_fingerprint" in updates:
-        from app.services.satisfactory_api import normalize_fingerprint
+        from app.services.tls_pins import normalize_fingerprint
 
         updates["cert_fingerprint"] = normalize_fingerprint(updates["cert_fingerprint"])
     merge_options(server, updates)
@@ -95,6 +96,10 @@ def server_types(_admin: str = Depends(require_admin)) -> list[ServerTypeOut]:
                 ],
                 secret_label=info.secret_label,
                 endpoint_style=info.endpoint_style,
+                ban_list_source=info.ban_list_source,
+                tick_rate_label=info.tick_rate_label,
+                tick_rate_unit=info.tick_rate_unit,
+                tick_rate_target=info.tick_rate_target,
             )
         )
     return out

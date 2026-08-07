@@ -4,7 +4,7 @@ Insurgency: Sandstorm (and many Source forks) answer with a single
 SERVERDATA_RESPONSE_VALUE and do **not** implement Valve's multi-packet
 empty-packet terminator reliably. Prefer single-response reads (ISRT-style).
 
-Prefer :func:`run_rcon` which reuses a long-lived connection — Sandstorm leaks
+Prefer :func:`run_rcon` which reuses a long-lived connection - Sandstorm leaks
 a thread per TCP session and never reaps it.
 """
 
@@ -189,9 +189,9 @@ class SourceRcon:
         except RconTimeoutError as exc:
             self.close()
             raise RconTimeoutError(
-                f"RCON auth timed out on {self.host}:{self.port} — TCP connects but the "
+                f"RCON auth timed out on {self.host}:{self.port} - TCP connects but the "
                 f"server never replies (wrong port, RCON not enabled, IP not allowed, "
-                f"or Sandstorm RCON thread exhaustion — restart game server)"
+                f"or Sandstorm RCON thread exhaustion - restart game server)"
             ) from exc
 
     def command(self, command: str) -> str:
@@ -228,7 +228,7 @@ class SourceRcon:
                 if self._sock is not None:
                     self._sock.settimeout(old_timeout)
         except RconTimeoutError as exc:
-            # Dead or stuck session — force reconnect next time
+            # Dead or stuck session - force reconnect next time
             self.close()
             raise RconTimeoutError(
                 f"RCON command timed out ({command!r}) on {self.host}:{self.port}"

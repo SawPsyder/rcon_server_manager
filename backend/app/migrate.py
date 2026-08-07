@@ -2,7 +2,7 @@
 
 Fresh installs rely on SQLAlchemy create_all. This module only patches
 older SQLite (and compatible) databases that pre-date newer columns.
-On Postgres, create_all creates the full current schema — column patches
+On Postgres, create_all creates the full current schema - column patches
 are still applied safely via information_schema when tables already exist.
 """
 
@@ -29,6 +29,46 @@ def _table_columns(engine: Engine, table: str) -> set[str]:
     if not insp.has_table(table):
         return set()
     return {c["name"] for c in insp.get_columns(table)}
+
+
+def _renormalize_unknown_identities(engine: Engine) -> None:
+    """Re-file moderation rows saved before crossplay ids were understood.
+
+    Platform-prefixed ids (``gdk_2535…``) used to fall through to
+    ``platform='unknown'`` with the prefix left on the external_id. The dossier
+    looks up ``(xbox, 2535…)``, so those rows were invisible - the moderation
+    history simply appeared empty. Neither table has a uniqueness constraint on
+    the identity pair, so this is a straight update.
+    """
+    from app.services.identity import parse_net_id
+
+    for table in ("player_action_logs", "player_admin_notes"):
+        if not _table_exists(engine, table):
+            continue
+        with engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    f"SELECT id, external_id FROM {table} WHERE platform = 'unknown'"
+                )
+            ).fetchall()
+            fixed = 0
+            for row_id, external_id in rows:
+                parsed = parse_net_id(external_id or "")
+                if parsed is None or parsed[0] == "unknown":
+                    continue
+                platform, canonical = parsed
+                if canonical == external_id and platform == "unknown":
+                    continue
+                conn.execute(
+                    text(
+                        f"UPDATE {table} SET platform = :p, external_id = :e "
+                        f"WHERE id = :i"
+                    ),
+                    {"p": platform, "e": canonical, "i": row_id},
+                )
+                fixed += 1
+        if fixed:
+            logger.info("Re-filed %s crossplay identities in %s", fixed, table)
 
 
 def _add_column(engine: Engine, table: str, column_def: str) -> None:
@@ -122,12 +162,21 @@ def run_migrations(engine: Engine) -> None:
                     "WHERE roster_json IS NULL OR roster_json = ''"
                 )
             )
-        # Tick rate at sample time. Left NULL for existing rows on purpose —
+        # Tick rate at sample time. Left NULL for existing rows on purpose -
         # backfilling a zero would draw a flat line for history we never sampled.
         if dialect == "postgresql":
             _add_column(engine, "player_count_samples", "tick_rate DOUBLE PRECISION")
         else:
             _add_column(engine, "player_count_samples", "tick_rate REAL")
+
+    # End of the previous session, so the player table can show "last visit"
+    # while someone is online. Left NULL for existing rows on purpose - we never
+    # recorded it, and inventing a timestamp would read as fact.
+    if _table_exists(engine, "player_server_stats"):
+        if dialect == "postgresql":
+            _add_column(engine, "player_server_stats", "previous_seen_at TIMESTAMPTZ")
+        else:
+            _add_column(engine, "player_server_stats", "previous_seen_at TIMESTAMP")
 
     # chart_shares: public cryptic chart share tokens
     if not _table_exists(engine, "chart_shares"):
@@ -159,6 +208,13 @@ def run_migrations(engine: Engine) -> None:
                 if s:
                     conn.execute(text(s))
         logger.info("Created table chart_shares (%s)", dialect)
+
+    # What was actually sent to the server. Needed to undo a ban on a platform
+    # whose canonical identity drops the prefix (gdk_/xsx_ → xbox).
+    if _table_exists(engine, "player_action_logs"):
+        _add_column(engine, "player_action_logs", "net_id VARCHAR(64) DEFAULT ''")
+
+    _renormalize_unknown_identities(engine)
 
     # migrate legacy preferred_gamemode setting → type default key
     if _table_exists(engine, "settings"):

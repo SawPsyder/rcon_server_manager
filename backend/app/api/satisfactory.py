@@ -1,7 +1,7 @@
 """Satisfactory-specific admin endpoints (HTTPS API passthrough).
 
-These operations have no equivalent in the other server types — saves, sessions,
-server options, advanced game settings — so they get their own router instead of
+These operations have no equivalent in the other server types - saves, sessions,
+server options, advanced game settings - so they get their own router instead of
 being forced into the generic adapter contract. The frontend shows the panel
 only when a type advertises ``features.admin_api``.
 
@@ -134,7 +134,7 @@ def health(
     db: Session = Depends(get_db),
     _admin: str = Depends(require_admin),
 ) -> SatisfactoryHealthOut:
-    """Reachability probe — works even without credentials."""
+    """Reachability probe - works even without credentials."""
     _server, client = _client(db, server_id, require_secret=False)
     with _api_errors():
         data = client.health_check()
@@ -303,7 +303,7 @@ def set_admin_password(
     """Change the game server's admin password.
 
     If this app authenticates with that password (rather than a static API
-    token), the stored secret is rotated too — otherwise the next poll would
+    token), the stored secret is rotated too - otherwise the next poll would
     fail with the old credentials.
     """
     if not body.password:
@@ -385,7 +385,7 @@ def load_game(
         )
     _log(db, server, f"LoadGame {body.save_name}")
     return SatisfactoryActionOut(
-        detail=f"Loading {body.save_name} — the server drops all players while it reloads."
+        detail=f"Loading {body.save_name} - the server drops all players while it reloads."
     )
 
 

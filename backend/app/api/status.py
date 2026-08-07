@@ -64,7 +64,9 @@ def server_status(
         options=options,
     )
 
-    if snap.get("player_list"):
+    # An empty roster we actually read means everyone left, and that has to
+    # reach update_presence or the last player's session never closes.
+    if snap.get("roster_known") or snap.get("player_list"):
         try:
             update_presence(
                 db,
@@ -104,9 +106,12 @@ def server_status(
             rank=p.get("rank"),
             ranked_players=int(p.get("ranked_players") or 0),
             last_seen_at=p.get("last_seen_at"),
-            last_seen_pretty=str(p.get("last_seen_pretty") or "—"),
+            last_seen_pretty=str(p.get("last_seen_pretty") or "-"),
+            previous_seen_at=p.get("previous_seen_at"),
+            previous_seen_pretty=str(p.get("previous_seen_pretty") or "-"),
             duration=float(p.get("duration", 0) or 0),
             duration_pretty=p.get("duration_pretty", "00:00:00"),
+            extra=p.get("extra") or None,
         )
         for i, p in enumerate(enriched)
     ]

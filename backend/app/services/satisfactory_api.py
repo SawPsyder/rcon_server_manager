@@ -15,10 +15,10 @@ disagree on capitalisation.
 
 Two things differ from the RCON transport this app started with:
 
-* **Auth** — a bearer token, obtained either from a long-lived API token
+* **Auth** - a bearer token, obtained either from a long-lived API token
   (``server.GenerateAPIToken`` in the server console) or by exchanging the admin
   password via ``PasswordLogin``. Tokens are cached per endpoint.
-* **TLS** — the server generates a self-signed certificate unless the operator
+* **TLS** - the server generates a self-signed certificate unless the operator
   installs their own, so verification is opt-in per server and can instead be
   anchored on a pinned SHA-256 fingerprint.
 """
@@ -27,12 +27,9 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import json
 import logging
 import re
-import socket
-import ssl
 import threading
 import time
 from dataclasses import dataclass, field
@@ -41,6 +38,13 @@ from typing import Any, Mapping
 import httpx
 
 from app.services.errors import CommandError
+from app.services.tls_pins import (
+    CertFetchError,
+    format_fingerprint,
+    normalize_fingerprint,
+    pin_mismatch_message,
+)
+from app.services.tls_pins import fetch_cert_fingerprint as _fetch_cert_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +57,7 @@ PRIVILEGE_INITIAL_ADMIN = "InitialAdmin"
 # Don't re-attempt a rejected login on every status poll
 DEFAULT_AUTH_COOLDOWN_SECONDS = 30.0
 
-# Tokens are "<base64 JSON payload>.<hex fingerprint>" — this shape check plus a
+# Tokens are "<base64 JSON payload>.<hex fingerprint>" - this shape check plus a
 # payload decode distinguishes a pasted API token from an admin password without
 # asking the user which one they gave us.
 TOKEN_RE = re.compile(r"^[A-Za-z0-9+/_\-=]{8,}\.[0-9a-fA-F]{8,}$")
@@ -111,39 +115,20 @@ def pick(data: Any, name: str, default: Any = None) -> Any:
     return default
 
 
-def normalize_fingerprint(value: str) -> str:
-    """Strip colons/spaces/0x and lowercase, so pasted formats all compare equal."""
-    return re.sub(r"[^0-9a-f]", "", (value or "").lower())
-
-
-def format_fingerprint(digest: str) -> str:
-    """Group a hex digest in colon-separated pairs for display."""
-    clean = normalize_fingerprint(digest)
-    return ":".join(clean[i : i + 2] for i in range(0, len(clean), 2))
-
-
 def fetch_cert_fingerprint(host: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> str:
     """SHA-256 of the server's presented certificate (DER), as lowercase hex.
 
     A server that is simply down raises :class:`SatisfactoryApiError`, not a TLS
-    error — "certificate problem" would send the operator chasing the wrong fix.
+    error - "certificate problem" would send the operator chasing the wrong fix.
     """
     try:
-        pem = ssl.get_server_certificate((host, int(port)), timeout=timeout)
-        der = ssl.PEM_cert_to_DER_cert(pem)
-    except ssl.SSLError as exc:
-        raise SatisfactoryTlsError(
-            f"TLS handshake with {host}:{port} failed while reading its certificate: {exc}"
-        ) from exc
-    except (TimeoutError, socket.timeout) as exc:
-        raise SatisfactoryTimeoutError(
-            f"Timed out reading the TLS certificate of {host}:{port}"
-        ) from exc
-    except OSError as exc:
-        raise SatisfactoryApiError(
-            f"Could not connect to {host}:{port}: {exc}"
-        ) from exc
-    return hashlib.sha256(der).hexdigest()
+        return _fetch_cert_fingerprint(host, port, timeout)
+    except CertFetchError as exc:
+        if exc.kind == "tls":
+            raise SatisfactoryTlsError(str(exc)) from exc
+        if exc.kind == "timeout":
+            raise SatisfactoryTimeoutError(str(exc)) from exc
+        raise SatisfactoryApiError(str(exc)) from exc
 
 
 @dataclass(frozen=True)
@@ -172,7 +157,7 @@ class ApiEndpoint:
 def looks_like_api_token(secret: str) -> bool:
     """True when a stored secret is a Satisfactory bearer token, not a password.
 
-    Shape alone is too loose — a password like ``mybase64ish.deadbeef`` matches —
+    Shape alone is too loose - a password like ``mybase64ish.deadbeef`` matches -
     so the base64 half must also decode to the JSON object the game puts there.
     """
     text = (secret or "").strip()
@@ -189,7 +174,7 @@ def looks_like_api_token(secret: str) -> bool:
 class SatisfactoryClient:
     """One authenticated conversation with a server's HTTPS API.
 
-    Not created directly in app code — use :data:`satisfactory_pool` so the
+    Not created directly in app code - use :data:`satisfactory_pool` so the
     bearer token and the underlying connection pool are reused across polls.
     """
 
@@ -235,9 +220,9 @@ class SatisfactoryClient:
         observed = fetch_cert_fingerprint(self.endpoint.host, self.endpoint.port, self.timeout)
         if observed != expected:
             raise SatisfactoryTlsError(
-                f"Certificate fingerprint mismatch for {self.endpoint.host}:"
-                f"{self.endpoint.port} — expected {format_fingerprint(expected)}, "
-                f"server presented {format_fingerprint(observed)}",
+                pin_mismatch_message(
+                    self.endpoint.host, self.endpoint.port, expected, observed
+                ),
                 observed_fingerprint=observed,
             )
 
@@ -272,7 +257,7 @@ class SatisfactoryClient:
                 )
                 if expired:
                     logger.info(
-                        "Satisfactory token rejected by %s (%s) — re-authenticating once",
+                        "Satisfactory token rejected by %s (%s) - re-authenticating once",
                         self.endpoint.host,
                         function,
                     )
@@ -307,7 +292,7 @@ class SatisfactoryClient:
             if "certificate" in lowered or "ssl" in lowered or "tls" in lowered:
                 raise SatisfactoryTlsError(
                     f"TLS handshake failed for {url}: {message}. Satisfactory serves a "
-                    f"self-signed certificate by default — turn off 'Verify TLS' for this "
+                    f"self-signed certificate by default - turn off 'Verify TLS' for this "
                     f"server, or pin its certificate fingerprint."
                 ) from exc
             raise SatisfactoryApiError(f"Could not connect to {url}: {message}") from exc
@@ -363,7 +348,7 @@ class SatisfactoryClient:
 
         secret = (self.endpoint.secret or "").strip()
         if looks_like_api_token(secret):
-            # Static token — use as-is; a bad one surfaces on the first real call
+            # Static token - use as-is; a bad one surfaces on the first real call
             self._token = secret
             self._token_kind = "api"
             return self._token
@@ -405,7 +390,7 @@ class SatisfactoryClient:
     # --- API functions -----------------------------------------------------
 
     def health_check(self, client_custom_data: str = "") -> dict[str, Any]:
-        """Reachability probe — the only call that needs no credentials."""
+        """Reachability probe - the only call that needs no credentials."""
         data = self.call(
             "HealthCheck", {"clientCustomData": client_custom_data}, auth=False
         )
@@ -464,7 +449,7 @@ class SatisfactoryClient:
         initial_token = str(pick(login, "authenticationToken", "") or "")
         if not initial_token:
             raise SatisfactoryAuthError(
-                "Server did not issue an InitialAdmin token — it is probably already claimed"
+                "Server did not issue an InitialAdmin token - it is probably already claimed"
             )
         with self._lock:
             self._token = initial_token
@@ -474,7 +459,7 @@ class SatisfactoryClient:
                 {"serverName": server_name, "adminPassword": admin_password},
             )
             token = str(pick(data, "authenticationToken", "") or "")
-            # The InitialAdmin token dies with the claim — keep the new one
+            # The InitialAdmin token dies with the claim - keep the new one
             self._token = token
             self._token_kind = "login" if token else ""
         return token
@@ -555,13 +540,13 @@ def _api_error(
     status: int | None,
 ) -> SatisfactoryApiError:
     parts = [p for p in (code, message) if p]
-    detail = " — ".join(parts) if parts else (f"HTTP {status}" if status else "unknown error")
+    detail = " - ".join(parts) if parts else (f"HTTP {status}" if status else "unknown error")
     text = f"{function} failed: {detail}"
 
     if code.lower() in _AUTH_ERROR_CODES or status in (401, 403):
         if code.lower() == "passwordless_login_not_possible":
             text = (
-                "This server is already claimed — set its admin password or an API "
+                "This server is already claimed - set its admin password or an API "
                 "token as the server secret under Servers."
             )
         return SatisfactoryAuthError(text, code=code, status=status)

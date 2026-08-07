@@ -66,7 +66,7 @@ class PublicPlayerStatPoint(BaseModel):
 
 
 class PublicPlayerStatsOut(BaseModel):
-    """Public share payload: counts only — no server_id, names, or sample_count."""
+    """Public share payload: counts only - no server_id, names, or sample_count."""
 
     range: str
     from_time: datetime

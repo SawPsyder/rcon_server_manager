@@ -10,6 +10,7 @@ from app.api import (
     chart_share,
     identities,
     maps,
+    palworld,
     rcon,
     satisfactory,
     servers,
@@ -43,6 +44,7 @@ app.include_router(maps.router)
 app.include_router(settings.router)
 app.include_router(identities.router)
 app.include_router(satisfactory.router)
+app.include_router(palworld.router)
 
 
 @app.on_event("startup")
@@ -62,16 +64,19 @@ def on_startup() -> None:
 @app.on_event("shutdown")
 def on_shutdown() -> None:
     collector.stop()
+    from app.services.palworld_api import palworld_pool
     from app.services.rcon_pool import rcon_pool
     from app.services.satisfactory_api import satisfactory_pool
 
     rcon_pool.invalidate_all()
     satisfactory_pool.invalidate_all()
+    palworld_pool.invalidate_all()
 
 
 @app.get("/api/health")
 def health() -> dict:
     from app.config import get_settings
+    from app.services.palworld_api import palworld_pool
     from app.services.rcon_pool import rcon_pool
     from app.services.satisfactory_api import satisfactory_pool
 
@@ -81,6 +86,7 @@ def health() -> dict:
         "database": "sqlite" if settings.is_sqlite else "postgresql" if settings.is_postgres else "other",
         "rcon_sessions": rcon_pool.stats(),
         "api_sessions": satisfactory_pool.stats(),
+        "palworld_sessions": palworld_pool.stats(),
     }
 
 

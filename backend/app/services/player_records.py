@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import PlayerActionLog, PlayerAdminNote, Server
-from app.services.identity import extract_eos_id, extract_steam_id, remember_identity
+from app.services.identity import parse_net_id, remember_identity
 
 STEAM_ID_RE = re.compile(r"^\d{17}$")
 
@@ -21,26 +21,20 @@ def normalize_identity(
 ) -> tuple[str, str] | None:
     """
     Return (platform, external_id) or None if we cannot identify the user.
-    platform: steam | eos | unknown
+    platform: steam | xbox | psn | eos | mac | unknown
     """
     raw = (net_id or "").strip()
     if not raw:
         return None
 
-    steam = extract_steam_id(raw)
-    if steam:
-        return "steam", steam
-
-    eos = extract_eos_id(raw)
-    if eos:
-        return "eos", eos
-
-    # Already-canonical forms
-    if STEAM_ID_RE.fullmatch(raw):
-        return "steam", raw
+    # Shared with presence tracking, so a moderation entry and a playtime row
+    # resolve to the same person for crossplay ids like ``gdk_2535…``
+    parsed = parse_net_id(raw)
+    if parsed is not None:
+        return parsed
 
     hint = (platform_hint or "").strip().lower()
-    if hint in {"steam", "eos", "unknown"}:
+    if hint in {"steam", "xbox", "psn", "eos", "mac", "unknown"}:
         return hint, raw
 
     return "unknown", raw
@@ -62,18 +56,25 @@ def log_player_action(
     """Persist a moderation action. Skips if no usable platform id."""
     ident = normalize_identity(net_id=net_id, platform_hint=platform_hint)
     if ident is None:
-        # Try name-only is not allowed for identity key — skip log
+        # Try name-only is not allowed for identity key - skip log
         return None
     platform, external_id = ident
 
     name = (player_name or "").strip()
-    if name and platform == "steam":
+    if name:
+        # Cache the name for every platform, not just Steam - otherwise a
+        # kicked Game Pass player has no name in the dossier unless presence
+        # happened to see them first. Only Steam has a public profile URL.
         remember_identity(
             db,
-            platform="steam",
+            platform=platform,
             external_id=external_id,
             display_name=name,
-            profile_url=f"https://steamcommunity.com/profiles/{external_id}",
+            profile_url=(
+                f"https://steamcommunity.com/profiles/{external_id}"
+                if platform == "steam"
+                else ""
+            ),
             source="moderation",
         )
 
@@ -84,6 +85,7 @@ def log_player_action(
         server_id=server.id if server else None,
         server_name=(server.name if server else "") or "",
         player_name=name,
+        net_id=(net_id or "").strip()[:64],
         reason=(reason or "").strip(),
         detail=(detail or "").strip(),
         ok=bool(ok),

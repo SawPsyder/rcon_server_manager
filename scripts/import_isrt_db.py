@@ -36,7 +36,7 @@ def main() -> None:
         import os
 
         os.environ["DATABASE_URL"] = f"sqlite:///{args.out_db.resolve().as_posix()}"
-        # recreate engine binding is already done at import — use direct connect via SessionLocal after create
+        # recreate engine binding is already done at import - use direct connect via SessionLocal after create
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
 

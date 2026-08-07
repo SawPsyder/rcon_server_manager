@@ -6,7 +6,7 @@ and registering it in ``app.server_types.__init__``.
 
 :class:`DefaultAdapter` carries the Source-engine behaviour the app started
 with: A2S for status and Source RCON for commands. Games that speak something
-else — e.g. Satisfactory's HTTPS API — override the two transport hooks
+else - e.g. Satisfactory's HTTPS API - override the two transport hooks
 (:meth:`~DefaultAdapter.query_status`, :meth:`~DefaultAdapter.execute_command`)
 and nothing in the generic layer needs to know the difference.
 """
@@ -24,7 +24,13 @@ if TYPE_CHECKING:
 class ServerFeatures:
     map_travel: bool = False
     structured_player_list: bool = False
+    # The game reports a per-player score. Off for games where the column would
+    # be filled with something that isn't one (Palworld reports a level).
+    player_score: bool = True
     kick_ban: bool = False
+    # The transport can enumerate existing bans. Separate from kick_ban: Palworld
+    # can ban but keeps its ban list in a file the REST API never exposes.
+    ban_list: bool = False
     admin_say: bool = False
     a2s_query: bool = True
     # Game-specific admin panel available (see api/<game>.py)
@@ -33,6 +39,8 @@ class ServerFeatures:
     console: bool = True
     # sample_players() reports a tick rate, so the history chart has data
     tick_rate_history: bool = False
+    # HTTP or HTTPS both possible (reverse proxy), so offer the scheme toggle
+    tls_optional: bool = False
 
     def to_dict(self) -> dict[str, bool]:
         return asdict(self)
@@ -61,6 +69,14 @@ class ServerTypeInfo:
     secret_label: str = "RCON password"
     # "query_rcon" → separate query + RCON ports; "single_port" → one API port
     endpoint_style: str = "query_rcon"
+    # Where the ban list comes from. "live" = ask the server (listbans);
+    # "local" = derive from our own moderation history, because the game exposes
+    # no way to enumerate bans (Palworld keeps them in a file on disk).
+    ban_list_source: str = "live"
+    # How the tick_rate series reads for this game (Source ticks vs server FPS)
+    tick_rate_label: str = "Tick rate"
+    tick_rate_unit: str = "tps"
+    tick_rate_target: int = 30
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -72,6 +88,10 @@ class ServerTypeInfo:
             "quick_buttons": [b.to_dict() for b in self.quick_buttons],
             "secret_label": self.secret_label,
             "endpoint_style": self.endpoint_style,
+            "ban_list_source": self.ban_list_source,
+            "tick_rate_label": self.tick_rate_label,
+            "tick_rate_unit": self.tick_rate_unit,
+            "tick_rate_target": self.tick_rate_target,
         }
 
 
@@ -153,6 +173,23 @@ class ServerTypeAdapter(Protocol):
     ) -> str:
         ...
 
+    def build_say_command(self, message: str) -> str:
+        ...
+
+    def build_kick_command(self, *, player_name: str, net_id: str, reason: str) -> str:
+        ...
+
+    def build_ban_command(
+        self, *, player_name: str, net_id: str, reason: str, minutes: int
+    ) -> str:
+        ...
+
+    def build_permban_command(self, *, player_name: str, net_id: str, reason: str) -> str:
+        ...
+
+    def build_unban_command(self, net_id: str) -> str:
+        ...
+
     def parse_bans(self, text: str) -> list[dict[str, Any]]:
         ...
 
@@ -231,6 +268,13 @@ class DefaultAdapter:
         timeout: float = 3.0,
         options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Snapshot of who is online.
+
+        Besides ``player_list``, a snapshot should set ``roster_known`` to True
+        whenever the roster was read successfully - **including when it came
+        back empty**. Presence uses it to tell "everyone left" apart from "we
+        could not ask", and only the former may close sessions.
+        """
         raise NotImplementedError("Server type must implement sample_players()")
 
     def player_count_hint(self, *, has_rcon_password: bool, snap: dict[str, Any]) -> str | None:
@@ -260,6 +304,28 @@ class DefaultAdapter:
         )
 
     # --- moderation -------------------------------------------------------
+
+    # The generic moderation endpoints build a command string and hand it to
+    # execute_command, exactly as map travel does. Games whose transport wants
+    # different arguments (Palworld's REST API addresses players by user ID, not
+    # display name) override these; the defaults are the Source RCON forms.
+
+    def build_say_command(self, message: str) -> str:
+        return f"say {message}"
+
+    def build_kick_command(self, *, player_name: str, net_id: str, reason: str) -> str:
+        return f'kick "{player_name}" "{reason}"'
+
+    def build_ban_command(
+        self, *, player_name: str, net_id: str, reason: str, minutes: int
+    ) -> str:
+        return f'ban "{player_name}" "{minutes}" "{reason}"'
+
+    def build_permban_command(self, *, player_name: str, net_id: str, reason: str) -> str:
+        return f'permban "{player_name}" "{reason}"'
+
+    def build_unban_command(self, net_id: str) -> str:
+        return f'unban "{net_id}"'
 
     def parse_bans(self, text: str) -> list[dict[str, Any]]:
         return []

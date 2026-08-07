@@ -2,7 +2,7 @@
 
 httpx.MockTransport bypasses TLS entirely, so these are the only tests that
 actually exercise the handshake, the pin check and the login round trip. The
-fixture stands up a throwaway HTTPS server with a self-signed certificate —
+fixture stands up a throwaway HTTPS server with a self-signed certificate -
 exactly what a stock Satisfactory dedicated server presents.
 """
 

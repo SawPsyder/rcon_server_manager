@@ -87,7 +87,7 @@ class StatsCollector:
                     adapter = get_adapter(st)
                 except KeyError:
                     logger.warning(
-                        "Server %s has unknown type %r — sampling as %s",
+                        "Server %s has unknown type %r - sampling as %s",
                         server.id,
                         st,
                         DEFAULT_SERVER_TYPE,
@@ -115,7 +115,7 @@ class StatsCollector:
                     )
                 elif snap.get("source") == "a2s" and password == "" and server.rcon_password_enc:
                     logger.warning(
-                        "Server %s: RCON password could not be decrypted — re-save it in Servers",
+                        "Server %s: RCON password could not be decrypted - re-save it in Servers",
                         server.id,
                     )
                 elif snap.get("source") == "a2s" and not password:
@@ -178,8 +178,10 @@ class StatsCollector:
                     )
                 )
 
-                # Presence / session tracking (humans with steam ids from RCON)
-                if snap.get("source") == "rcon" or snap.get("player_list"):
+                # Presence / session tracking. roster_known covers the case the
+                # old `source == "rcon"` check was standing in for: a roster we
+                # read successfully, even when it came back empty.
+                if snap.get("roster_known") or snap.get("player_list"):
                     try:
                         update_presence(
                             db,

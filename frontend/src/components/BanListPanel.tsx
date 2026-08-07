@@ -9,6 +9,8 @@ type Props = {
   steamLookupEnabled?: boolean;
   fromCache?: boolean;
   fetchedAt?: string | null;
+  /** "live" = queried from the server; "local" = derived from our own history. */
+  source?: "live" | "local" | string;
   page: number;
   pageSize: number;
   total: number;
@@ -31,6 +33,7 @@ export default function BanListPanel({
   steamLookupEnabled,
   fromCache,
   fetchedAt,
+  source = "live",
   page,
   pageSize,
   total,
@@ -62,7 +65,7 @@ export default function BanListPanel({
         <h2 style={{ margin: 0 }}>Banned players</h2>
         <div className="row wrap">
           <button className="btn" type="button" disabled={busy || loading} onClick={onRefresh}>
-            {loading ? "Loading…" : "Refresh from server"}
+            {loading ? "Loading…" : source === "local" ? "Reload" : "Refresh from server"}
           </button>
           {raw != null && raw !== "" && (
             <button className="btn ghost" type="button" onClick={onToggleRaw}>
@@ -72,8 +75,16 @@ export default function BanListPanel({
         </div>
       </div>
       <p className="muted" style={{ marginTop: "0.35rem" }}>
-        Cached per server. Default view is the cache;{" "}
-        <strong>Refresh from server</strong> runs live <code>listbans</code>.{" "}
+        {source === "local" ? (
+          // The game exposes no way to read its real ban list, so this is
+          // derived from our own moderation log.
+          <>Only bans through this dashboard are shown. </>
+        ) : (
+          <>
+            Cached per server. Default view is the cache;{" "}
+            <strong>Refresh from server</strong> runs live <code>listbans</code>.{" "}
+          </>
+        )}
         {fromCache && fetchedLabel ? (
           <>
             Cache from <strong>{fetchedLabel}</strong>.
@@ -88,7 +99,7 @@ export default function BanListPanel({
           <>Web API + local identity cache.</>
         ) : (
           <>
-            local cache/play history only — set <code>STEAM_WEB_API_KEY</code> for full lookup.
+            local cache/play history only - set <code>STEAM_WEB_API_KEY</code> for full lookup.
           </>
         )}
       </p>
@@ -118,7 +129,9 @@ export default function BanListPanel({
             ) : bans.length === 0 ? (
               <tr>
                 <td colSpan={7} className="muted">
-                  No bans on this page. Use Refresh from server if the cache is empty.
+                  {source === "local"
+                    ? "No bans issued from this dashboard yet."
+                    : "No bans on this page. Use Refresh from server if the cache is empty."}
                 </td>
               </tr>
             ) : (
@@ -159,7 +172,7 @@ export default function BanListPanel({
                         ) : b.display_name ? (
                           <strong>{b.display_name}</strong>
                         ) : (
-                          <span className="muted">—</span>
+                          <span className="muted">-</span>
                         )}
                         {b.name_source ? (
                           <div className="muted" style={{ fontSize: "0.7rem" }}>

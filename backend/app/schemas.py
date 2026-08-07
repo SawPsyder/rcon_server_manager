@@ -20,12 +20,15 @@ class AuthStatus(BaseModel):
 class ServerFeaturesOut(BaseModel):
     map_travel: bool = False
     structured_player_list: bool = False
+    player_score: bool = True
     kick_ban: bool = False
+    ban_list: bool = False
     admin_say: bool = False
     a2s_query: bool = True
     admin_api: bool = False
     console: bool = True
     tick_rate_history: bool = False
+    tls_optional: bool = False
 
 
 class QuickButtonOut(BaseModel):
@@ -42,16 +45,23 @@ class ServerTypeOut(BaseModel):
     quick_buttons: list[QuickButtonOut] = Field(default_factory=list)
     secret_label: str = "RCON password"
     endpoint_style: str = "query_rcon"
+    ban_list_source: str = "live"
+    tick_rate_label: str = "Tick rate"
+    tick_rate_unit: str = "tps"
+    tick_rate_target: int = 30
 
 
 class ServerOptionsIn(BaseModel):
     """Per-server connection extras (stored in servers.options_json)."""
 
+    # Only meaningful for types that advertise features.tls_optional
+    use_https: bool | None = None
     verify_tls: bool | None = None
     cert_fingerprint: str | None = Field(default=None, max_length=128)
 
 
 class ServerOptionsOut(BaseModel):
+    use_https: bool = False
     verify_tls: bool = False
     cert_fingerprint: str = ""
 
@@ -120,9 +130,16 @@ class PlayerInfo(BaseModel):
     rank: int | None = None
     ranked_players: int = 0
     last_seen_at: str | None = None
-    last_seen_pretty: str = "—"
+    last_seen_pretty: str = "-"
+    # End of the session before the current one. Every row in the player table
+    # is someone online, so this is the only last-seen value that says anything.
+    previous_seen_at: str | None = None
+    previous_seen_pretty: str = "-"
     duration: float = 0.0
     duration_pretty: str = "00:00:00"
+    # Game-specific per-player scalars with no column of their own, rendered as
+    # extra columns. Mirrors ServerStatus.extra one level down.
+    extra: dict[str, Any] | None = None
 
 
 class ServerStatus(BaseModel):
@@ -238,6 +255,105 @@ class NewGameRequest(BaseModel):
     map_name: str = ""
     starting_location: str = ""
     skip_onboarding: bool = True
+    confirm: bool = False
+
+
+class PalworldInfoOut(BaseModel):
+    version: str = ""
+    server_name: str = ""
+    description: str = ""
+    # Post-0.2.x servers only
+    world_guid: str = ""
+
+
+class PalworldMetricsOut(BaseModel):
+    """None means "this server version didn't report it", never a reading of 0."""
+
+    server_fps: int | None = None
+    current_players: int | None = None
+    max_players: int | None = None
+    frame_time_ms: float | None = None
+    uptime: int | None = None
+    # days is post-0.2.x, base_camps is 1.x-only
+    days: int | None = None
+    base_camps: int | None = None
+
+
+class PalworldPlayerOut(BaseModel):
+    name: str = ""
+    # Bare SteamID64 when the platform is Steam, else the raw platform user ID
+    steamid: str = ""
+    user_id: str = ""
+    account_name: str = ""
+    player_id: str = ""
+    ip: str = ""
+    level: int | None = None
+    ping: float | None = None
+    building_count: int | None = None
+    location_x: float | None = None
+    location_y: float | None = None
+
+
+class PalworldPlayersOut(BaseModel):
+    players: list[PalworldPlayerOut] = Field(default_factory=list)
+
+
+class PalworldSettingsOut(BaseModel):
+    """Read-only: the REST API exposes no way to write settings.
+
+    The server returns a curated subset of the INI (68 of ~119 keys in 1.0) and
+    deliberately omits AdminPassword / ServerPassword / RCONPassword.
+    """
+
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class PalworldWorldPlayer(BaseModel):
+    name: str = ""
+    user_id: str = ""
+    level: int | None = None
+    hp: int | None = None
+    max_hp: int | None = None
+    guild_name: str = ""
+    location_x: float | None = None
+    location_y: float | None = None
+    location_z: float | None = None
+    pal_count: int = 0
+
+
+class PalworldBaseCampOut(BaseModel):
+    guild_name: str = ""
+    guild_id: str = ""
+    location_x: float | None = None
+    location_y: float | None = None
+    location_z: float | None = None
+
+
+class PalworldWorldOut(BaseModel):
+    """Server-side summary of /v1/api/game-data - the raw payload can be huge."""
+
+    enabled: bool = True
+    hint: str = ""
+    snapshot_time: str = ""
+    fps: float | None = None
+    average_fps: float | None = None
+    actor_counts: dict[str, int] = Field(default_factory=dict)
+    players: list[PalworldWorldPlayer] = Field(default_factory=list)
+    base_camps: list[PalworldBaseCampOut] = Field(default_factory=list)
+
+
+class PalworldActionOut(BaseModel):
+    ok: bool = True
+    detail: str = ""
+
+
+class AnnounceRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+
+
+class PalworldShutdownRequest(BaseModel):
+    waittime: int = Field(default=30, ge=0, le=3600)
+    message: str = Field(default="", max_length=1000)
     confirm: bool = False
 
 

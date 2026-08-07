@@ -37,12 +37,50 @@ def test_capabilities_unchanged():
     features = info.features
     assert features.map_travel is True
     assert features.structured_player_list is True
+    # Source games do report a score, so that column must stay
+    assert features.player_score is True
     assert features.kick_ban is True
     assert features.admin_say is True
     assert features.a2s_query is True
-    # New flags must not silently switch a game into the Satisfactory panel
+    # Sandstorm's listbans is the reason ban_list exists; it must stay on
+    assert features.ban_list is True
+    # New flags must not silently switch a game into another type's admin panel
     assert features.admin_api is False
     assert features.console is True
+    assert features.tls_optional is False
+    # The tick-rate chart labels default to what Sandstorm/Satisfactory showed
+    assert (info.tick_rate_label, info.tick_rate_unit, info.tick_rate_target) == (
+        "Tick rate",
+        "tps",
+        30,
+    )
+
+
+def test_moderation_commands_are_byte_identical_to_the_inlined_versions():
+    """These strings used to be f-strings inside api/rcon.py.
+
+    Moving them behind adapter hooks (so Palworld can address players by user ID)
+    must not change a single character of what Sandstorm sends over RCON.
+    """
+    a = sandstorm_adapter
+    assert a.build_say_command("hello world") == "say hello world"
+    assert (
+        a.build_kick_command(player_name="Bob", net_id="7656119", reason="Kicked by admin")
+        == 'kick "Bob" "Kicked by admin"'
+    )
+    assert (
+        a.build_ban_command(
+            player_name="Bob", net_id="7656119", reason="Banned by admin", minutes=60
+        )
+        == 'ban "Bob" "60" "Banned by admin"'
+    )
+    assert (
+        a.build_permban_command(
+            player_name="Bob", net_id="7656119", reason="Permanently banned by admin"
+        )
+        == 'permban "Bob" "Permanently banned by admin"'
+    )
+    assert a.build_unban_command("7656119") == 'unban "7656119"'
 
 
 # --- transport routing ----------------------------------------------------
