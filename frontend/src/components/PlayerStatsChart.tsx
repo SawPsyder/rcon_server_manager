@@ -31,6 +31,10 @@ type Props = {
   refreshMs?: number;
   /** Show share link control (admin only) */
   showShare?: boolean;
+  /** Strip card background/border (public embed / nobg) */
+  plain?: boolean;
+  /** Override chart plot height in px */
+  height?: number;
 };
 
 type ChartPoint = {
@@ -125,6 +129,8 @@ export default function PlayerStatsChart({
   compact = false,
   refreshMs = DEFAULT_REFRESH_MS,
   showShare = false,
+  plain = false,
+  height,
 }: Props) {
   const [range, setRange] = useState<StatsRange>("24h");
   const [stats, setStats] = useState<PlayerStats | null>(null);
@@ -218,7 +224,8 @@ export default function PlayerStatsChart({
   );
 
   const fillId = `playersFill-${shareToken || serverId || "none"}`;
-  const chartHeight = compact ? 160 : 280;
+  const chartHeight =
+    typeof height === "number" && height > 0 ? height : compact ? 160 : 280;
   // Roster tooltips + missing-name hints only for authenticated admin charts
   const showNameHints = !shareToken;
 
@@ -226,8 +233,17 @@ export default function PlayerStatsChart({
     return null;
   }
 
+  const cardClass = [
+    "card",
+    "chart-card",
+    compact ? "chart-card-compact" : "",
+    plain ? "chart-card-plain" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <section className={`card chart-card${compact ? " chart-card-compact" : ""}`}>
+    <section className={cardClass}>
       <div className="row between wrap" style={{ alignItems: "center" }}>
         <div className="chart-summary row wrap">
           <span className="chip">
@@ -296,9 +312,15 @@ export default function PlayerStatsChart({
         </div>
       )}
 
-      <div className={`chart-wrap${compact ? " chart-wrap-compact" : ""}`}>
+      <div
+        className={`chart-wrap${compact ? " chart-wrap-compact" : ""}${plain ? " chart-wrap-plain" : ""}`}
+        style={typeof height === "number" && height > 0 ? { minHeight: height } : undefined}
+      >
         {chartData.length === 0 ? (
-          <div className={`chart-empty muted${compact ? " chart-empty-compact" : ""}`}>
+          <div
+            className={`chart-empty muted${compact ? " chart-empty-compact" : ""}`}
+            style={typeof height === "number" && height > 0 ? { minHeight: height } : undefined}
+          >
             {loading ? "Loading…" : "No data yet"}
           </div>
         ) : (
