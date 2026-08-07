@@ -1,14 +1,16 @@
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AdminAuth, MapConfig, Setting
+from app.models import AdminAuth, Setting
 from app.security import hash_password
-from app.seed_data import (
-    CUSTOM_CHECKPOINT_MAPS,
-    VANILLA_CHECKPOINT_MAPS,
-    checkpoint_scenario,
-)
-from app.server_types.sandstorm import DEFAULT_PREFERRED_GAMEMODE
+from app.server_types import list_adapters
+
+# Type-agnostic first-boot settings; per-game defaults live in each adapter's seed()
+DEFAULT_SETTINGS = {
+    "query_timeout": "2.0",
+    "poll_interval_seconds": "10",
+    "stats_interval_seconds": "60",
+}
 
 
 def ensure_admin(db: Session) -> None:
@@ -20,43 +22,13 @@ def ensure_admin(db: Session) -> None:
 
 
 def seed_if_empty(db: Session) -> None:
-    if db.query(MapConfig).count() == 0:
-        for alias, map_name in VANILLA_CHECKPOINT_MAPS:
-            db.add(
-                MapConfig(
-                    server_type="sandstorm",
-                    alias=alias,
-                    map_name=map_name,
-                    day=True,
-                    night=True,
-                    checkpoint=checkpoint_scenario(alias, "security"),
-                    checkpoint_ins=checkpoint_scenario(alias, "insurgents"),
-                    self_added=False,
-                )
-            )
-        for alias, map_name in CUSTOM_CHECKPOINT_MAPS:
-            db.add(
-                MapConfig(
-                    server_type="sandstorm",
-                    alias=alias,
-                    map_name=map_name,
-                    day=True,
-                    night=True,
-                    checkpoint=checkpoint_scenario(alias, "security"),
-                    checkpoint_ins=checkpoint_scenario(alias, "insurgents"),
-                    self_added=True,
-                )
-            )
-
-    defaults = {
-        "query_timeout": "2.0",
-        "poll_interval_seconds": "10",
-        "stats_interval_seconds": "60",
-        "type.sandstorm.preferred_gamemode": DEFAULT_PREFERRED_GAMEMODE,
-    }
     existing = {s.key for s in db.query(Setting).all()}
-    for key, value in defaults.items():
+    for key, value in DEFAULT_SETTINGS.items():
         if key not in existing:
             db.add(Setting(key=key, value=value))
+
+    # Each server type seeds its own maps / defaults (idempotent)
+    for adapter in list_adapters():
+        adapter.seed(db)
 
     db.commit()

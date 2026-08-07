@@ -37,6 +37,8 @@ class PlayerStatPoint(BaseModel):
     online: bool
     # Names present at this sample (admin only; public omits)
     player_names: list[str] = Field(default_factory=list)
+    # None where the server type reports no tick rate, or was offline/paused
+    tick_rate: float | None = None
 
 
 class PlayerStatsOut(BaseModel):
@@ -48,6 +50,10 @@ class PlayerStatsOut(BaseModel):
     current_players: int | None = None
     peak_players: int | None = None
     avg_players: float | None = None
+    # Tick-rate summary; all None when nothing in range reported one
+    current_tick_rate: float | None = None
+    min_tick_rate: float | None = None
+    avg_tick_rate: float | None = None
 
 
 class PublicPlayerStatPoint(BaseModel):
@@ -77,12 +83,14 @@ def _point_from_row(r: PlayerCountSample, *, include_names: bool = True) -> Play
         if include_names
         else []
     )
+    tick = getattr(r, "tick_rate", None)
     return PlayerStatPoint(
         t=r.recorded_at,
         players=float(r.players),
         max_players=float(r.max_players),
         online=bool(r.online),
         player_names=names,
+        tick_rate=float(tick) if tick is not None else None,
     )
 
 
@@ -147,6 +155,14 @@ def build_player_stats(
     )
     current = rows[-1].players if rows else None
 
+    # Summarise from every row in range, not the downsampled points, so a dip
+    # that got averaged out of the line still shows up in the numbers.
+    ticks = [
+        float(r.tick_rate)
+        for r in rows
+        if getattr(r, "tick_rate", None) is not None
+    ]
+
     return PlayerStatsOut(
         server_id=server_id,
         range=range_key,
@@ -156,6 +172,9 @@ def build_player_stats(
         current_players=current,
         peak_players=peak,
         avg_players=avg,
+        current_tick_rate=round(ticks[-1], 1) if ticks else None,
+        min_tick_rate=round(min(ticks), 1) if ticks else None,
+        avg_tick_rate=round(sum(ticks) / len(ticks), 1) if ticks else None,
     )
 
 

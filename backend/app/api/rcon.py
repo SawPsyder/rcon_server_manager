@@ -19,45 +19,56 @@ from app.schemas import (
     UnbanRequest,
 )
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
-from app.server_types.sandstorm import build_travel_command, map_gamemodes, parse_listbans
 from app.services.ban_cache import load_cached_bans, remove_cached_ban, replace_server_bans
+from app.services.errors import CommandError
 from app.services.identity import steam_api_configured
 from app.services.player_records import log_player_action
-from app.services.rcon import RconError, run_rcon
+from app.services.server_options import load_options
 
 router = APIRouter(tags=["rcon"])
 
 
-def _require_feature(server, feature: str) -> None:
+def _adapter_for(server):
     try:
-        adapter = get_adapter(server.server_type or DEFAULT_SERVER_TYPE)
+        return get_adapter(server.server_type or DEFAULT_SERVER_TYPE)
     except KeyError as exc:
-        raise HTTPException(status_code=400, detail=f"Unknown server type: {server.server_type}") from exc
+        raise HTTPException(
+            status_code=400, detail=f"Unknown server type: {server.server_type}"
+        ) from exc
+
+
+def _require_feature(server, feature: str):
+    """Guard a feature-gated endpoint; returns the resolved adapter."""
+    adapter = _adapter_for(server)
     if not getattr(adapter.info.features, feature, False):
         raise HTTPException(
             status_code=400,
             detail=f"Feature '{feature}' is not supported for server type '{adapter.info.id}'",
         )
+    return adapter
 
 
 def _exec(db: Session, server_id: int, command: str) -> RconCommandResponse:
     settings = get_settings()
     server = get_server_or_404(db, server_id)
     password = get_rcon_password(server)
-    if not password:
-        raise HTTPException(status_code=400, detail="Server has no RCON password configured")
     try:
         adapter = get_adapter(server.server_type or DEFAULT_SERVER_TYPE)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=f"Unknown server type: {server.server_type}") from exc
+    if not password:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Server has no {adapter.info.secret_label.lower()} configured",
+        )
     try:
-        response = run_rcon(
+        response = adapter.execute_command(
             server.host,
-            server.rcon_port,
-            password,
-            command,
+            port=server.rcon_port,
+            secret=password,
+            command=command,
             timeout=settings.rcon_timeout,
-            allowed_prefixes=adapter.allowed_rcon_prefixes,
+            options=load_options(server),
         )
         db.add(
             CommandHistory(
@@ -68,7 +79,7 @@ def _exec(db: Session, server_id: int, command: str) -> RconCommandResponse:
         )
         db.commit()
         return RconCommandResponse(command=command, response=response or "", ok=True)
-    except RconError as exc:
+    except CommandError as exc:
         return RconCommandResponse(command=command, response="", ok=False, error=str(exc))
 
 
@@ -259,7 +270,7 @@ def list_bans(
     for the current page only.
     """
     server = get_server_or_404(db, server_id)
-    _require_feature(server, "kick_ban")
+    adapter = _require_feature(server, "kick_ban")
     page = max(1, page)
     page_size = min(100, max(1, page_size))
 
@@ -296,7 +307,7 @@ def list_bans(
         )
 
     raw = result.response or ""
-    parsed = parse_listbans(raw)
+    parsed = adapter.parse_bans(raw)
     try:
         replace_server_bans(db, server_id, parsed=parsed, raw=raw, ok=True, error="")
         db.commit()
@@ -338,11 +349,15 @@ def _build_travel(db: Session, body: TravelRequest, server_type: str) -> TravelP
     map_type = getattr(map_row, "server_type", None) or DEFAULT_SERVER_TYPE
     if map_type != server_type:
         raise HTTPException(status_code=400, detail="Map is not valid for this server type")
-    gamemodes = map_gamemodes(map_row)
+    try:
+        adapter = get_adapter(server_type)
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=f"Unknown server type: {server_type}") from exc
+    gamemodes = adapter.map_gamemodes(map_row)
     if body.gamemode_key not in gamemodes:
         raise HTTPException(status_code=400, detail=f"Gamemode '{body.gamemode_key}' not available for this map")
     scenario = gamemodes[body.gamemode_key]
-    command = build_travel_command(
+    command = adapter.build_travel_command(
         map_name=map_row.map_name,
         scenario=scenario,
         lighting=body.lighting,

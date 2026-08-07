@@ -5,7 +5,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, chart_share, identities, maps, rcon, servers, settings, stats, status
+from app.api import (
+    auth,
+    chart_share,
+    identities,
+    maps,
+    rcon,
+    satisfactory,
+    servers,
+    settings,
+    stats,
+    status,
+)
 from app.bootstrap import ensure_admin, seed_if_empty
 from app.database import Base, SessionLocal, engine, wait_for_database
 from app.migrate import run_migrations
@@ -31,6 +42,7 @@ app.include_router(rcon.router)
 app.include_router(maps.router)
 app.include_router(settings.router)
 app.include_router(identities.router)
+app.include_router(satisfactory.router)
 
 
 @app.on_event("startup")
@@ -51,20 +63,24 @@ def on_startup() -> None:
 def on_shutdown() -> None:
     collector.stop()
     from app.services.rcon_pool import rcon_pool
+    from app.services.satisfactory_api import satisfactory_pool
 
     rcon_pool.invalidate_all()
+    satisfactory_pool.invalidate_all()
 
 
 @app.get("/api/health")
 def health() -> dict:
     from app.config import get_settings
     from app.services.rcon_pool import rcon_pool
+    from app.services.satisfactory_api import satisfactory_pool
 
     settings = get_settings()
     return {
         "status": "ok",
         "database": "sqlite" if settings.is_sqlite else "postgresql" if settings.is_postgres else "other",
         "rcon_sessions": rcon_pool.stats(),
+        "api_sessions": satisfactory_pool.stats(),
     }
 
 

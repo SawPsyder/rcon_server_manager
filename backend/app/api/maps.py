@@ -5,14 +5,17 @@ from app.database import get_db
 from app.deps import require_admin
 from app.models import MapConfig
 from app.schemas import MapOut
-from app.server_types import DEFAULT_SERVER_TYPE, is_known_type
-from app.server_types.sandstorm import GAMEMODE_LABELS, map_gamemodes, map_lightings
+from app.server_types import DEFAULT_SERVER_TYPE, get_adapter, is_known_type
 
 router = APIRouter(prefix="/api", tags=["maps"])
 
 
 def _map_out(row: MapConfig) -> MapOut:
-    gms = map_gamemodes(row)
+    server_type = getattr(row, "server_type", None) or DEFAULT_SERVER_TYPE
+    try:
+        adapter = get_adapter(server_type)
+    except KeyError:
+        adapter = get_adapter(DEFAULT_SERVER_TYPE)
     return MapOut(
         id=row.id,
         alias=row.alias,
@@ -21,9 +24,9 @@ def _map_out(row: MapConfig) -> MapOut:
         day=row.day,
         night=row.night,
         self_added=row.self_added,
-        server_type=getattr(row, "server_type", None) or DEFAULT_SERVER_TYPE,
-        gamemodes=gms,
-        lightings=map_lightings(row),
+        server_type=server_type,
+        gamemodes=adapter.map_gamemodes(row),
+        lightings=adapter.map_lightings(row),
     )
 
 
@@ -49,6 +52,7 @@ def gamemode_labels(
     _admin: str = Depends(require_admin),
 ) -> dict[str, str]:
     st = server_type.strip().lower() or DEFAULT_SERVER_TYPE
-    if st == "sandstorm":
-        return GAMEMODE_LABELS
-    return {}
+    try:
+        return get_adapter(st).gamemode_labels()
+    except KeyError:
+        return {}

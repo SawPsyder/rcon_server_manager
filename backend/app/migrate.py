@@ -122,6 +122,12 @@ def run_migrations(engine: Engine) -> None:
                     "WHERE roster_json IS NULL OR roster_json = ''"
                 )
             )
+        # Tick rate at sample time. Left NULL for existing rows on purpose —
+        # backfilling a zero would draw a flat line for history we never sampled.
+        if dialect == "postgresql":
+            _add_column(engine, "player_count_samples", "tick_rate DOUBLE PRECISION")
+        else:
+            _add_column(engine, "player_count_samples", "tick_rate REAL")
 
     # chart_shares: public cryptic chart share tokens
     if not _table_exists(engine, "chart_shares"):

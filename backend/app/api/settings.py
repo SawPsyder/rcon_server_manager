@@ -5,8 +5,7 @@ from app.database import get_db
 from app.deps import require_admin
 from app.models import Setting
 from app.schemas import SettingsOut, SettingsUpdate, TypeSettingsOut
-from app.server_types import list_server_types
-from app.server_types.sandstorm import DEFAULT_PREFERRED_GAMEMODE
+from app.server_types import get_adapter, list_adapters, list_server_types
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -30,13 +29,15 @@ def _type_preferred_key(type_id: str) -> str:
 
 def _type_settings(db: Session) -> dict[str, TypeSettingsOut]:
     out: dict[str, TypeSettingsOut] = {}
-    for info in list_server_types():
-        default = DEFAULT_PREFERRED_GAMEMODE if info.id == "sandstorm" else ""
-        # fall back to legacy global key for sandstorm
-        val = _get(db, _type_preferred_key(info.id), "")
-        if not val and info.id == "sandstorm":
-            val = _get(db, "preferred_gamemode", default)
-        out[info.id] = TypeSettingsOut(preferred_gamemode=val or default)
+    for adapter in list_adapters():
+        type_id = adapter.info.id
+        default = adapter.default_preferred_gamemode
+        val = _get(db, _type_preferred_key(type_id), "")
+        # Fall back to the pre-per-type settings key where the game had one
+        legacy_key = adapter.legacy_preferred_gamemode_key
+        if not val and legacy_key:
+            val = _get(db, legacy_key, default)
+        out[type_id] = TypeSettingsOut(preferred_gamemode=val or default)
     return out
 
 
@@ -79,6 +80,14 @@ def resolve_preferred_gamemode(db: Session, server_type: str, server_override: s
     typed = _get(db, _type_preferred_key(server_type), "")
     if typed:
         return typed
-    if server_type == "sandstorm":
-        return _get(db, "preferred_gamemode", DEFAULT_PREFERRED_GAMEMODE)
-    return ""
+    try:
+        adapter = get_adapter(server_type)
+    except KeyError:
+        return ""
+    if adapter.legacy_preferred_gamemode_key:
+        return _get(
+            db,
+            adapter.legacy_preferred_gamemode_key,
+            adapter.default_preferred_gamemode,
+        )
+    return adapter.default_preferred_gamemode
