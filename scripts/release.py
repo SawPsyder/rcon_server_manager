@@ -8,13 +8,20 @@ Typical flow (from a clean working tree):
   python scripts/release.py analyse
   python scripts/release.py analyse --bump minor
 
-  # Full release: merge develop → master, tag, push, GitHub Release
+  # Preview README feature bullets (structure-safe; markers only)
+  python scripts/release.py update-readme --dry-run
+
+  # Full release: optional README feature append → merge develop → master, tag
   python scripts/release.py release --bump patch --yes
 
   # Dry-run of the full flow (prints planned git/gh commands)
   python scripts/release.py release --bump patch --dry-run
 
 Requires: git, gh (authenticated), network access for push/release.
+
+README updates only append bullets inside ``<!-- FEATURES:BEGIN/END -->``.
+Other sections (Supported games, Quick start, Environment variables, etc.)
+are never rewritten by this tool.
 """
 
 from __future__ import annotations
@@ -28,11 +35,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+README_PATH = REPO_ROOT / "README.md"
 TAG_RE = re.compile(r"^v(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(?P<pre>.*)?$")
 CONVENTIONAL = re.compile(
     r"^(?P<type>feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)"
     r"(?:\((?P<scope>[^)]+)\))?(?P<breaking>!)?:\s*(?P<subject>.+)$",
     re.IGNORECASE,
+)
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from readme_features import (  # noqa: E402
+    ReadmeError,
+    preview_diff,
+    update_readme_features,
 )
 
 
@@ -381,6 +396,74 @@ def confirm(prompt: str, yes: bool) -> bool:
     return answer in {"y", "yes"}
 
 
+def feat_subjects_from_analysis(a: Analysis) -> list[str]:
+    return [
+        c.subject
+        for c in a.commits
+        if c.conventional_type == "feat"
+    ]
+
+
+def apply_readme_feature_update(
+    a: Analysis,
+    *,
+    dry_run: bool = False,
+    skip: bool = False,
+) -> list[str]:
+    """Append feat bullets into README Features markers. Returns added lines."""
+    if skip:
+        print("README feature update skipped (--skip-readme).")
+        return []
+    subjects = feat_subjects_from_analysis(a)
+    if not subjects:
+        print("README feature update: no feat commits in range.")
+        return []
+    try:
+        if dry_run:
+            print(preview_diff(README_PATH, subjects))
+            changed, added = update_readme_features(
+                README_PATH, subjects, dry_run=True
+            )
+            return added if changed else []
+        changed, added = update_readme_features(README_PATH, subjects, dry_run=False)
+    except ReadmeError as exc:
+        raise CmdError(f"README feature update failed: {exc}") from exc
+    if not changed:
+        print("README feature update: nothing new to append.")
+        return []
+    print(f"README feature update: appended {len(added)} bullet(s):")
+    for line in added:
+        print(f"  {line}")
+    return added
+
+
+def cmd_update_readme(args: argparse.Namespace) -> int:
+    """Standalone: preview or apply feature bullets from commits since last tag."""
+    ensure_repo()
+    a = analyse(
+        bump=None,
+        base=args.develop_branch,
+        update_working_copy=not args.dry_run,
+    )
+    print_analysis(a)
+    if not working_tree_clean() and not args.dry_run:
+        raise CmdError("Working tree is not clean. Commit or stash first.")
+    added = apply_readme_feature_update(a, dry_run=args.dry_run)
+    if args.dry_run or not added:
+        return 0
+    run(["git", "add", "README.md"])
+    run(
+        [
+            "git",
+            "commit",
+            "-m",
+            "docs: append release features to README",
+        ]
+    )
+    print("Committed README feature list update.")
+    return 0
+
+
 def cmd_release(args: argparse.Namespace) -> int:
     ensure_repo()
     dry = args.dry_run
@@ -419,11 +502,17 @@ def cmd_release(args: argparse.Namespace) -> int:
         print()
         print("Planned actions:")
         print(f"  1. checkout + pull origin/{develop}")
-        print(f"  2. merge {develop} → {master} (create master if missing)")
-        print(f"  3. annotated tag {new_tag} on {master}")
-        print(f"  4. push origin {master} + {new_tag}")
-        print(f"  5. gh release create {new_tag} --target {master}")
-        print(f"  6. checkout {develop}")
+        print(
+            "  2. append new feat bullets into README "
+            f"({FEATURES_HINT if not args.skip_readme else 'skipped'})"
+        )
+        print(f"  3. merge {develop} → {master} (create master if missing)")
+        print(f"  4. annotated tag {new_tag} on {master}")
+        print(f"  5. push origin {master} + {new_tag}")
+        print(f"  6. gh release create {new_tag} --target {master}")
+        print(f"  7. checkout {develop}")
+        print()
+        apply_readme_feature_update(a, dry_run=True, skip=args.skip_readme)
         print()
         print("[dry-run] No remote or GitHub changes made.")
         return 0
@@ -431,6 +520,25 @@ def cmd_release(args: argparse.Namespace) -> int:
     # --- live path ---
     run(["git", "checkout", develop])
     run(["git", "pull", "--ff-only", "origin", develop], check=False)
+
+    # Re-analyse on the tip we actually ship
+    a = analyse(bump=args.bump, base=develop, update_working_copy=False)
+    new_ver = resolve_version(a, args.bump, args.version)
+    new_tag = new_ver.tag()
+    notes = a.changelog_markdown(new_tag)
+
+    added = apply_readme_feature_update(a, dry_run=False, skip=args.skip_readme)
+    if added:
+        run(["git", "add", "README.md"])
+        run(
+            [
+                "git",
+                "commit",
+                "-m",
+                f"docs: append README features for {new_tag}",
+            ]
+        )
+        run(["git", "push", "origin", develop])
 
     has_master = bool(git("show-ref", "--verify", f"refs/heads/{master}", check=False))
     remote_master = bool(
@@ -490,10 +598,15 @@ def cmd_release(args: argparse.Namespace) -> int:
     print("=" * 60)
     print(f"Release {new_tag} complete.")
     print("  master + tag pushed; GitHub Release created.")
+    if added:
+        print(f"  README Features: +{len(added)} bullet(s) (markers only).")
     print(f"  Docker image workflow should run for tag {new_tag}.")
     print(f"  https://github.com/SawPsyder/rcon_server_manager/releases/tag/{new_tag}")
     print("=" * 60)
     return 0
+
+
+FEATURES_HINT = "<!-- FEATURES:BEGIN/END --> only"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -521,6 +634,17 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--version", help="Explicit next version (e.g. 0.2.0 or v0.2.0)")
     a.set_defaults(func=cmd_analyse)
 
+    u = sub.add_parser(
+        "update-readme",
+        help="Append feat bullets into README Features markers (structure-safe)",
+    )
+    u.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show bullets that would be added without writing README",
+    )
+    u.set_defaults(func=cmd_update_readme)
+
     r = sub.add_parser(
         "release",
         help="Merge develop→master, tag, push, create GitHub Release",
@@ -546,6 +670,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-empty",
         action="store_true",
         help="Allow release even when there are no new commits",
+    )
+    r.add_argument(
+        "--skip-readme",
+        action="store_true",
+        help="Do not append feat bullets to README Features on this release",
     )
     r.set_defaults(func=cmd_release)
 
