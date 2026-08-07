@@ -40,6 +40,8 @@ def test_capabilities_unchanged():
     # Source games do report a score, so that column must stay
     assert features.player_score is True
     assert features.kick_ban is True
+    # Source RCON supports duration-based bans
+    assert features.timed_ban is True
     assert features.admin_say is True
     assert features.a2s_query is True
     # Sandstorm's listbans is the reason ban_list exists; it must stay on

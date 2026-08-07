@@ -105,6 +105,23 @@ class ChartShare(Base):
     server: Mapped[Server] = relationship()
 
 
+class MapShare(Base):
+    """Public unguessable share token for a Palworld live world map."""
+
+    __tablename__ = "map_shares"
+    __table_args__ = (
+        UniqueConstraint("server_id", name="uq_map_share_server"),
+        Index("ix_map_shares_token", "token", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    server: Mapped[Server] = relationship()
+
+
 class PlayerServerStats(Base):
     """
     Per-player presence stats for a game server, derived from continuous sampling.

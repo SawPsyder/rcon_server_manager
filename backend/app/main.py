@@ -9,6 +9,7 @@ from app.api import (
     auth,
     chart_share,
     identities,
+    map_share,
     maps,
     palworld,
     rcon,
@@ -39,6 +40,8 @@ app.include_router(status.router)
 app.include_router(stats.router)
 app.include_router(chart_share.admin_router)
 app.include_router(chart_share.public_router)
+app.include_router(map_share.admin_router)
+app.include_router(map_share.public_router)
 app.include_router(rcon.router)
 app.include_router(maps.router)
 app.include_router(settings.router)

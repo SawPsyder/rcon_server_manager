@@ -22,6 +22,7 @@ class ServerFeaturesOut(BaseModel):
     structured_player_list: bool = False
     player_score: bool = True
     kick_ban: bool = False
+    timed_ban: bool = False
     ban_list: bool = False
     admin_say: bool = False
     a2s_query: bool = True
@@ -315,18 +316,40 @@ class PalworldWorldPlayer(BaseModel):
     hp: int | None = None
     max_hp: int | None = None
     guild_name: str = ""
+    guild_id: str = ""
     location_x: float | None = None
     location_y: float | None = None
     location_z: float | None = None
+    rotation_z: float | None = None
     pal_count: int = 0
 
 
 class PalworldBaseCampOut(BaseModel):
+    id: str = ""
+    guild_name: str = ""
+    guild_id: str = ""
+    name: str = ""
+    location_x: float | None = None
+    location_y: float | None = None
+    location_z: float | None = None
+
+
+class PalworldMapEntity(BaseModel):
+    """Positioned non-player actor for the admin world map (workers, wild, NPCs)."""
+
+    id: str = ""
+    name: str = ""
+    species: str = ""
+    level: int | None = None
+    hp: int | None = None
+    max_hp: int | None = None
     guild_name: str = ""
     guild_id: str = ""
     location_x: float | None = None
     location_y: float | None = None
     location_z: float | None = None
+    rotation_z: float | None = None
+    activity: str = ""
 
 
 class PalworldWorldOut(BaseModel):
@@ -337,9 +360,16 @@ class PalworldWorldOut(BaseModel):
     snapshot_time: str = ""
     fps: float | None = None
     average_fps: float | None = None
+    in_game_time: str = ""
+    in_game_days: int | None = None
     actor_counts: dict[str, int] = Field(default_factory=dict)
     players: list[PalworldWorldPlayer] = Field(default_factory=list)
     base_camps: list[PalworldBaseCampOut] = Field(default_factory=list)
+    workers: list[PalworldMapEntity] = Field(default_factory=list)
+    wild_pals: list[PalworldMapEntity] = Field(default_factory=list)
+    npcs: list[PalworldMapEntity] = Field(default_factory=list)
+    # Party pals following a player (when present in the dump)
+    otomo_pals: list[PalworldMapEntity] = Field(default_factory=list)
 
 
 class PalworldActionOut(BaseModel):

@@ -344,6 +344,7 @@ class SandstormAdapter(DefaultAdapter):
             map_travel=True,
             structured_player_list=True,
             kick_ban=True,
+            timed_ban=True,
             ban_list=True,
             admin_say=True,
             a2s_query=True,

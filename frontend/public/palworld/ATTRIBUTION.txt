@@ -1,0 +1,14 @@
+palpagos-map.webp
+================
+
+Source: Palworld Wiki (wiki.gg) — File:World Map.webp
+  https://palworld.wiki.gg/wiki/File:World_Map.webp
+
+Shipped at full resolution 8192 × 8192 as lossy WebP quality 95.
+
+This image is from Palworld and is copyright Pocketpair, Inc.
+It is bundled here solely so server operators can place live player and
+base-camp positions on the in-game world map inside the admin UI.
+
+Coordinate projection constants follow DT_WorldMapUIData.json as documented at:
+  https://palworld.wiki.gg/wiki/Maps

@@ -172,7 +172,8 @@ def ban_player(
     _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
-    adapter = _require_feature(server, "kick_ban")
+    # Games without timed bans (e.g. Palworld) only expose permanent bans.
+    adapter = _require_feature(server, "timed_ban")
     minutes = body.ban_minutes or 60
     reason = body.reason.strip() or "Banned by admin"
     cmd = adapter.build_ban_command(
