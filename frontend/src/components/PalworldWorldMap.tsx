@@ -256,14 +256,29 @@ const PalworldWorldMap = forwardRef<PalworldWorldMapHandle, Props>(
     const [legendOpen, setLegendOpen] = useState(false);
     const [, setSmoothFrame] = useState(0);
 
-    const dragRef = useRef<{
-      pointerId: number;
-      startX: number;
-      startY: number;
-      originX: number;
-      originY: number;
-      moved: boolean;
-    } | null>(null);
+    /** Active pointers on the viewport (supports one-finger pan + two-finger pinch). */
+    const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+    const gestureRef = useRef<
+      | {
+          mode: "pan";
+          pointerId: number;
+          startX: number;
+          startY: number;
+          originX: number;
+          originY: number;
+          moved: boolean;
+        }
+      | {
+          mode: "pinch";
+          startDist: number;
+          startZoom: number;
+          startPan: { x: number; y: number };
+          /** Midpoint relative to viewport centre at pinch start. */
+          startMid: { x: number; y: number };
+          moved: boolean;
+        }
+      | null
+    >(null);
     const animRef = useRef<number | null>(null);
     const smoothRafRef = useRef<number | null>(null);
     const viewRef = useRef({ zoom: 1, pan: { x: 0, y: 0 }, viewportSide: 560 });
@@ -612,10 +627,26 @@ const PalworldWorldMap = forwardRef<PalworldWorldMapHandle, Props>(
       if (!el) return;
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
-        zoomAt(e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP, e.clientX, e.clientY);
+        // Trackpad pinch often arrives as ctrl+wheel; still zoom toward cursor.
+        const factor =
+          e.ctrlKey
+            ? Math.exp(-e.deltaY * 0.01)
+            : e.deltaY < 0
+              ? ZOOM_STEP
+              : 1 / ZOOM_STEP;
+        zoomAt(factor, e.clientX, e.clientY);
+      };
+      // Non-passive touchmove so the browser cannot scroll/zoom the page while
+      // we own the gesture (needed on some mobile Safari builds).
+      const onTouchMove = (e: TouchEvent) => {
+        if (e.cancelable) e.preventDefault();
       };
       el.addEventListener("wheel", onWheel, { passive: false });
-      return () => el.removeEventListener("wheel", onWheel);
+      el.addEventListener("touchmove", onTouchMove, { passive: false });
+      return () => {
+        el.removeEventListener("wheel", onWheel);
+        el.removeEventListener("touchmove", onTouchMove);
+      };
     }, [zoomAt]);
 
     const clientToNormalized = useCallback(
@@ -634,44 +665,165 @@ const PalworldWorldMap = forwardRef<PalworldWorldMapHandle, Props>(
       [pan.x, pan.y, zoom, viewportSide]
     );
 
-    const onPointerDown = (e: React.PointerEvent) => {
-      if (e.button !== 0) return;
-      cancelAnim();
-      stopFollow();
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      dragRef.current = {
-        pointerId: e.pointerId,
-        startX: e.clientX,
-        startY: e.clientY,
-        originX: pan.x,
-        originY: pan.y,
+    const viewportLocal = useCallback((clientX: number, clientY: number) => {
+      const el = viewportRef.current;
+      if (!el) return { x: 0, y: 0 };
+      const rect = el.getBoundingClientRect();
+      return {
+        x: clientX - rect.left - rect.width / 2,
+        y: clientY - rect.top - rect.height / 2,
+      };
+    }, []);
+
+    const beginPanFromPointer = useCallback(
+      (pointerId: number, clientX: number, clientY: number) => {
+        const { pan: origin } = viewRef.current;
+        gestureRef.current = {
+          mode: "pan",
+          pointerId,
+          startX: clientX,
+          startY: clientY,
+          originX: origin.x,
+          originY: origin.y,
+          moved: false,
+        };
+      },
+      []
+    );
+
+    const beginPinchFromPointers = useCallback(() => {
+      const pts = [...pointersRef.current.values()];
+      if (pts.length < 2) return;
+      const [a, b] = pts;
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (dist < 1) return;
+      const midClient = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const mid = viewportLocal(midClient.x, midClient.y);
+      const { zoom: z, pan: p } = viewRef.current;
+      gestureRef.current = {
+        mode: "pinch",
+        startDist: dist,
+        startZoom: z,
+        startPan: { ...p },
+        startMid: mid,
         moved: false,
       };
+    }, [viewportLocal]);
+
+    const onPointerDown = (e: React.PointerEvent) => {
+      // Primary button / touch / pen only; ignore right/middle mouse.
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      cancelAnim();
+      stopFollow();
+      try {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      } catch {
+        /* capture can throw if the element is gone */
+      }
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const n = pointersRef.current.size;
+      if (n >= 2) {
+        beginPinchFromPointers();
+      } else {
+        beginPanFromPointer(e.pointerId, e.clientX, e.clientY);
+      }
     };
 
     const onPointerMove = (e: React.PointerEvent) => {
+      if (pointersRef.current.has(e.pointerId)) {
+        pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+
       const norm = clientToNormalized(e.clientX, e.clientY);
       if (norm && norm.u >= 0 && norm.u <= 1 && norm.v >= 0 && norm.v <= 1) {
         setCursorWorld(normalizedToWorld(norm.u, norm.v));
       } else setCursorWorld(null);
-      const drag = dragRef.current;
-      if (!drag || drag.pointerId !== e.pointerId) return;
-      const dx = e.clientX - drag.startX;
-      const dy = e.clientY - drag.startY;
-      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
-      const nextPan = { x: drag.originX + dx, y: drag.originY + dy };
-      viewRef.current = { ...viewRef.current, pan: nextPan };
+
+      const gesture = gestureRef.current;
+      if (!gesture) return;
+
+      if (gesture.mode === "pan") {
+        if (gesture.pointerId !== e.pointerId) return;
+        const dx = e.clientX - gesture.startX;
+        const dy = e.clientY - gesture.startY;
+        if (Math.abs(dx) + Math.abs(dy) > 3) gesture.moved = true;
+        const nextPan = { x: gesture.originX + dx, y: gesture.originY + dy };
+        viewRef.current = { ...viewRef.current, pan: nextPan };
+        setPan(nextPan);
+        return;
+      }
+
+      // Pinch: zoom about the starting midpoint, pan with midpoint drift.
+      const pts = [...pointersRef.current.values()];
+      if (pts.length < 2) return;
+      const [a, b] = pts;
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (dist < 1 || gesture.startDist < 1) return;
+      const scale = dist / gesture.startDist;
+      if (Math.abs(scale - 1) > 0.01) gesture.moved = true;
+      const nextZoom = Math.min(
+        MAX_ZOOM,
+        Math.max(MIN_ZOOM, gesture.startZoom * scale)
+      );
+      const ratio = nextZoom / gesture.startZoom;
+      const midClient = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const mid = viewportLocal(midClient.x, midClient.y);
+      // Midpoint movement counts as a drag too (two-finger pan).
+      if (
+        Math.hypot(mid.x - gesture.startMid.x, mid.y - gesture.startMid.y) > 3
+      ) {
+        gesture.moved = true;
+      }
+      const nextPan = {
+        x: mid.x - (gesture.startMid.x - gesture.startPan.x) * ratio,
+        y: mid.y - (gesture.startMid.y - gesture.startPan.y) * ratio,
+      };
+      viewRef.current = {
+        zoom: nextZoom,
+        pan: nextPan,
+        viewportSide: viewRef.current.viewportSide,
+      };
+      setZoom(nextZoom);
       setPan(nextPan);
     };
 
     const onPointerUp = (e: React.PointerEvent) => {
-      const drag = dragRef.current;
-      if (drag && drag.pointerId === e.pointerId) {
-        if (!drag.moved) {
+      const had = pointersRef.current.has(e.pointerId);
+      pointersRef.current.delete(e.pointerId);
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+      if (!had) return;
+
+      const remaining = pointersRef.current.size;
+      const gesture = gestureRef.current;
+
+      if (remaining === 0) {
+        if (gesture && !gesture.moved) {
           stopFollow();
           onSelect(null);
         }
-        dragRef.current = null;
+        gestureRef.current = null;
+        return;
+      }
+
+      if (remaining === 1) {
+        // Drop back to one-finger pan without a jump.
+        const [id, pt] = [...pointersRef.current.entries()][0];
+        beginPanFromPointer(id, pt.x, pt.y);
+        // Preserve "moved" so a pinch that ends on one finger doesn't clear selection.
+        if (gesture?.moved && gestureRef.current?.mode === "pan") {
+          gestureRef.current.moved = true;
+        }
+        return;
+      }
+
+      // Still 2+ fingers: re-baseline the pinch from current view.
+      beginPinchFromPointers();
+      if (gesture?.moved && gestureRef.current?.mode === "pinch") {
+        gestureRef.current.moved = true;
       }
     };
 
@@ -927,7 +1079,11 @@ const PalworldWorldMap = forwardRef<PalworldWorldMapHandle, Props>(
                       ? `${m.label}${m.detail ? ` — ${m.detail}` : ""} · Double-click to follow`
                       : `${m.label}${m.detail ? ` — ${m.detail}` : ""}`
                   }
-                  onPointerDown={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => {
+                    // Mouse: keep drags from starting on a pin (click = select).
+                    // Touch/pen: let events reach the viewport so pan + pinch work.
+                    if (e.pointerType === "mouse") e.stopPropagation();
+                  }}
                   onClick={(e) => {
                     e.stopPropagation();
                     onMarkerActivate(m);
@@ -964,7 +1120,7 @@ const PalworldWorldMap = forwardRef<PalworldWorldMapHandle, Props>(
                 </span>
               ) : (
                 <span className="muted">
-                  Drag · scroll zoom
+                  Drag · pinch / scroll zoom
                   {showRoster ? " · double-click player to follow" : ""}
                 </span>
               )}
