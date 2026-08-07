@@ -10,7 +10,7 @@ from app.schemas import PlayerInfo, ServerFeaturesOut, ServerStatus
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
 from app.services.players import sample_player_count
 from app.services.presence import enrich_player_list, update_presence
-from app.services.query import query_server_status
+from app.services.server_options import load_options
 from app.services.status_cache import update_server_status_cache
 
 router = APIRouter(prefix="/api/servers", tags=["status"])
@@ -42,9 +42,18 @@ def server_status(
         adapter = get_adapter(DEFAULT_SERVER_TYPE)
         st = DEFAULT_SERVER_TYPE
 
-    raw = query_server_status(server.host, server.query_port, timeout=timeout)
-
     password = get_rcon_password(server)
+    options = load_options(server)
+
+    raw = adapter.query_status(
+        server.host,
+        server.query_port,
+        timeout=timeout,
+        rcon_port=server.rcon_port,
+        secret=password,
+        options=options,
+    )
+
     snap = sample_player_count(
         host=server.host,
         query_port=server.query_port,
@@ -52,6 +61,7 @@ def server_status(
         rcon_password=password,
         timeout=timeout,
         server_type=st,
+        options=options,
     )
 
     if snap.get("player_list"):
@@ -166,4 +176,5 @@ def server_status(
         error=error,
         from_cache=from_cache,
         last_status_at=server.last_status_at,
+        extra=raw.get("extra") or None,
     )

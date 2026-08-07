@@ -1,6 +1,16 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -70,6 +80,10 @@ class PlayerCountSample(Base):
     online: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # JSON list of {name, steamid?} present at sample time (empty string if unknown)
     roster_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    # Server-reported simulation rate at sample time. NULL for server types that
+    # do not expose one (A2S has no equivalent), so the chart shows a gap rather
+    # than a misleading zero.
+    tick_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     server: Mapped[Server] = relationship(back_populates="player_samples")
 

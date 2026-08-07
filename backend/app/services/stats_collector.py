@@ -10,11 +10,11 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.models import PlayerCountSample, Server, Setting
 from app.security import decrypt_secret
-from app.server_types import DEFAULT_SERVER_TYPE
+from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
 from app.services.players import sample_player_count
 from app.services.presence import update_presence
-from app.services.query import query_server_status
 from app.services.roster import roster_from_player_list, roster_to_json
+from app.services.server_options import load_options
 from app.services.status_cache import update_server_status_cache
 
 logger = logging.getLogger(__name__)
@@ -83,6 +83,18 @@ class StatsCollector:
             for server in servers:
                 password = decrypt_secret(server.rcon_password_enc)
                 st = getattr(server, "server_type", None) or DEFAULT_SERVER_TYPE
+                try:
+                    adapter = get_adapter(st)
+                except KeyError:
+                    logger.warning(
+                        "Server %s has unknown type %r — sampling as %s",
+                        server.id,
+                        st,
+                        DEFAULT_SERVER_TYPE,
+                    )
+                    st = DEFAULT_SERVER_TYPE
+                    adapter = get_adapter(st)
+                options = load_options(server)
                 snap = sample_player_count(
                     host=server.host,
                     query_port=server.query_port,
@@ -90,6 +102,7 @@ class StatsCollector:
                     rcon_password=password,
                     timeout=timeout,
                     server_type=st,
+                    options=options,
                 )
                 if snap.get("rcon_error"):
                     logger.warning(
@@ -112,9 +125,16 @@ class StatsCollector:
                         st,
                     )
 
-                # Refresh identity cache (hostname / map / gamemode) via A2S
+                # Refresh identity cache (hostname / map / gamemode)
                 try:
-                    raw = query_server_status(server.host, server.query_port, timeout=timeout)
+                    raw = adapter.query_status(
+                        server.host,
+                        server.query_port,
+                        timeout=timeout,
+                        rcon_port=server.rcon_port,
+                        secret=password,
+                        options=options,
+                    )
                     if raw.get("online"):
                         update_server_status_cache(
                             server,
@@ -144,6 +164,7 @@ class StatsCollector:
                     )
 
                 roster = roster_from_player_list(snap.get("player_list") or [])
+                tick = snap.get("tick_rate")
                 db.add(
                     PlayerCountSample(
                         server_id=server.id,
@@ -152,6 +173,8 @@ class StatsCollector:
                         max_players=int(snap.get("max_players") or 0),
                         online=bool(snap.get("online")),
                         roster_json=roster_to_json(roster),
+                        # Stays NULL for types that report no tick rate at all
+                        tick_rate=float(tick) if tick is not None else None,
                     )
                 )
 

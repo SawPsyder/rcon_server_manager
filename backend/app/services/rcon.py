@@ -15,6 +15,8 @@ import struct
 from enum import IntEnum
 from typing import Iterable
 
+from app.services.errors import CommandError
+
 
 class PacketType(IntEnum):
     SERVERDATA_RESPONSE_VALUE = 0
@@ -23,7 +25,7 @@ class PacketType(IntEnum):
     SERVERDATA_AUTH = 3
 
 
-class RconError(Exception):
+class RconError(CommandError):
     pass
 
 

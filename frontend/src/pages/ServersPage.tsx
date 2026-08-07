@@ -9,6 +9,8 @@ type FormState = {
   rcon_password: string;
   server_type: string;
   preferred_gamemode: string;
+  verify_tls: boolean;
+  cert_fingerprint: string;
 };
 
 const emptyForm = (types: ServerTypeInfo[]): FormState => {
@@ -21,6 +23,8 @@ const emptyForm = (types: ServerTypeInfo[]): FormState => {
     rcon_password: "",
     server_type: t?.id ?? "sandstorm",
     preferred_gamemode: "",
+    verify_tls: false,
+    cert_fingerprint: "",
   };
 };
 
@@ -39,6 +43,9 @@ export default function ServersPage() {
   }, [types]);
 
   const selectedType = typeById.get(form.server_type);
+  // Games whose admin API and query share one port (Satisfactory: 7777)
+  const singlePort = selectedType?.endpoint_style === "single_port";
+  const secretLabel = selectedType?.secret_label || "RCON password";
 
   const load = async () => {
     const [sv, ty] = await Promise.all([api.listServers(), api.serverTypes()]);
@@ -86,15 +93,26 @@ export default function ServersPage() {
           ? form.preferred_gamemode.trim()
           : null;
 
+      // One API port for single-port games — the backend keeps both columns in sync
+      const queryPort = Number(form.query_port);
+      const rconPort = singlePort ? queryPort : Number(form.rcon_port);
+      const options = selectedType?.features.admin_api
+        ? {
+            verify_tls: form.verify_tls,
+            cert_fingerprint: form.cert_fingerprint.trim(),
+          }
+        : undefined;
+
       if (editId) {
         const payload: Parameters<typeof api.updateServer>[1] = {
           name: form.name,
           host: form.host,
-          query_port: Number(form.query_port),
-          rcon_port: Number(form.rcon_port),
+          query_port: queryPort,
+          rcon_port: rconPort,
           server_type: form.server_type,
         };
         if (form.rcon_password) payload.rcon_password = form.rcon_password;
+        if (options) payload.options = options;
         if (preferred) {
           payload.preferred_gamemode = preferred;
         } else {
@@ -105,11 +123,12 @@ export default function ServersPage() {
         await api.createServer({
           name: form.name,
           host: form.host,
-          query_port: Number(form.query_port),
-          rcon_port: Number(form.rcon_port),
+          query_port: queryPort,
+          rcon_port: rconPort,
           rcon_password: form.rcon_password,
           server_type: form.server_type,
           preferred_gamemode: preferred,
+          options,
         });
       }
 
@@ -133,6 +152,8 @@ export default function ServersPage() {
       rcon_password: "",
       server_type: s.server_type || "sandstorm",
       preferred_gamemode: s.preferred_gamemode || "",
+      verify_tls: s.options?.verify_tls ?? false,
+      cert_fingerprint: s.options?.cert_fingerprint ?? "",
     });
   };
 
@@ -182,7 +203,7 @@ export default function ServersPage() {
             />
           </label>
           <label>
-            Query port
+            {singlePort ? "API port" : "Query port"}
             <input
               type="number"
               value={form.query_port}
@@ -190,17 +211,19 @@ export default function ServersPage() {
               required
             />
           </label>
-          <label>
-            RCON port
-            <input
-              type="number"
-              value={form.rcon_port}
-              onChange={(e) => setForm({ ...form, rcon_port: Number(e.target.value) })}
-              required
-            />
-          </label>
+          {!singlePort && (
+            <label>
+              RCON port
+              <input
+                type="number"
+                value={form.rcon_port}
+                onChange={(e) => setForm({ ...form, rcon_port: Number(e.target.value) })}
+                required
+              />
+            </label>
+          )}
           <label className="full">
-            RCON password {editId ? "(leave blank to keep)" : ""}
+            {secretLabel} {editId ? "(leave blank to keep)" : ""}
             <input
               type="password"
               value={form.rcon_password}
@@ -208,6 +231,33 @@ export default function ServersPage() {
               required={!editId}
             />
           </label>
+
+          {selectedType?.features.admin_api && (
+            <>
+              <label className="full">
+                <input
+                  type="checkbox"
+                  checked={form.verify_tls}
+                  onChange={(e) => setForm({ ...form, verify_tls: e.target.checked })}
+                />{" "}
+                Verify TLS certificate
+                <small className="muted">
+                  {selectedType.label} serves a self-signed certificate unless you
+                  installed your own, so leave this off and pin the fingerprint instead.
+                </small>
+              </label>
+              <label className="full">
+                Pinned certificate fingerprint (SHA-256, optional)
+                <input
+                  value={form.cert_fingerprint}
+                  onChange={(e) =>
+                    setForm({ ...form, cert_fingerprint: e.target.value })
+                  }
+                  placeholder="aa:bb:cc:… — leave blank to skip certificate checks"
+                />
+              </label>
+            </>
+          )}
 
           {selectedType?.features.map_travel && (
             <label className="full">
@@ -254,7 +304,7 @@ export default function ServersPage() {
                   <th>Type</th>
                   <th>Host</th>
                   <th>Query</th>
-                  <th>RCON</th>
+                  <th>Admin</th>
                   <th></th>
                 </tr>
               </thead>
@@ -270,7 +320,10 @@ export default function ServersPage() {
                     </td>
                     <td>{s.query_port}</td>
                     <td>
-                      {s.rcon_port} {s.has_rcon_password ? "🔒" : "⚠️"}
+                      {typeById.get(s.server_type)?.endpoint_style === "single_port"
+                        ? "same port"
+                        : s.rcon_port}{" "}
+                      {s.has_rcon_password ? "🔒" : "⚠️"}
                     </td>
                     <td className="row right">
                       <button className="btn small" onClick={() => startEdit(s)}>

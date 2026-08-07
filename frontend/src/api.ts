@@ -4,6 +4,12 @@ export type ServerFeatures = {
   kick_ban: boolean;
   admin_say: boolean;
   a2s_query: boolean;
+  /** Game-specific admin panel is available for this type. */
+  admin_api: boolean;
+  /** Free-text command console makes sense for this type. */
+  console: boolean;
+  /** Samples carry a tick rate, so the tick-rate history chart has data. */
+  tick_rate_history: boolean;
 };
 
 export type QuickButton = {
@@ -18,6 +24,16 @@ export type ServerTypeInfo = {
   default_rcon_port: number;
   features: ServerFeatures;
   quick_buttons: QuickButton[];
+  /** UI label for the stored secret ("RCON password", "API token", ...). */
+  secret_label: string;
+  /** "query_rcon" = separate ports; "single_port" = one API port. */
+  endpoint_style: "query_rcon" | "single_port" | string;
+};
+
+/** Per-server connection extras (servers.options_json). */
+export type ServerOptions = {
+  verify_tls: boolean;
+  cert_fingerprint: string;
 };
 
 export type Server = {
@@ -29,6 +45,7 @@ export type Server = {
   server_type: string;
   preferred_gamemode?: string | null;
   has_rcon_password: boolean;
+  options: ServerOptions;
   last_hostname?: string | null;
   last_map?: string | null;
   last_lighting?: string | null;
@@ -85,6 +102,62 @@ export type ServerStatus = {
   error?: string | null;
   from_cache?: boolean;
   last_status_at?: string | null;
+  /** Game-specific scalars with no column of their own (tick rate, tier, ...). */
+  extra?: Record<string, string | number | boolean | null> | null;
+};
+
+export type SatisfactoryState = {
+  active_session_name: string;
+  num_connected_players: number;
+  player_limit: number;
+  tech_tier: number;
+  active_schematic: string;
+  game_phase: string;
+  is_game_running: boolean;
+  total_game_duration: number;
+  is_game_paused: boolean;
+  average_tick_rate: number;
+  auto_load_session_name: string;
+};
+
+export type SatisfactoryOptions = {
+  server_options: Record<string, string>;
+  pending_server_options: Record<string, string>;
+};
+
+export type SatisfactoryAdvanced = {
+  creative_mode_enabled: boolean;
+  advanced_game_settings: Record<string, unknown>;
+};
+
+export type SatisfactorySaveHeader = {
+  saveName?: string;
+  saveVersion?: number;
+  buildVersion?: number;
+  mapName?: string;
+  sessionName?: string;
+  playDurationSeconds?: number;
+  saveDateTime?: string;
+  isModdedSave?: boolean;
+  isEditedSave?: boolean;
+  isCreativeModeEnabled?: boolean;
+  [key: string]: unknown;
+};
+
+export type SatisfactorySession = {
+  sessionName?: string;
+  saveHeaders?: SatisfactorySaveHeader[];
+  [key: string]: unknown;
+};
+
+export type SatisfactorySessions = {
+  sessions: SatisfactorySession[];
+  current_session_index: number;
+};
+
+export type SatisfactoryAction = {
+  ok: boolean;
+  detail: string;
 };
 
 export type MapConfig = {
@@ -209,6 +282,8 @@ export type PlayerStatPoint = {
   online: boolean;
   /** Names present at this sample (empty for legacy samples). */
   player_names?: string[];
+  /** Null when the type reports no tick rate, or the server was offline/paused. */
+  tick_rate?: number | null;
 };
 
 export type PlayerStats = {
@@ -221,6 +296,10 @@ export type PlayerStats = {
   current_players: number | null;
   peak_players: number | null;
   avg_players: number | null;
+  /** All null when nothing in range reported a tick rate. */
+  current_tick_rate?: number | null;
+  min_tick_rate?: number | null;
+  avg_tick_rate?: number | null;
 };
 
 export type ChartShare = {
@@ -284,6 +363,7 @@ export const api = {
     rcon_password: string;
     server_type: string;
     preferred_gamemode?: string | null;
+    options?: Partial<ServerOptions>;
   }) =>
     request<Server>("/api/servers", {
       method: "POST",
@@ -300,6 +380,7 @@ export const api = {
       server_type: string;
       preferred_gamemode: string | null;
       clear_preferred_gamemode: boolean;
+      options: Partial<ServerOptions>;
     }>
   ) =>
     request<Server>(`/api/servers/${id}`, {
@@ -427,4 +508,97 @@ export const api = {
     request<
       { id: number; server_id: number | null; command: string; response: string; created_at: string }[]
     >(`/api/servers/${serverId}/history`),
+
+  /** Satisfactory HTTPS API passthrough (only for types with features.admin_api). */
+  satisfactory: {
+    health: (id: number) =>
+      request<{ health: string; server_custom_data: string }>(
+        `/api/servers/${id}/satisfactory/health`
+      ),
+    state: (id: number) =>
+      request<SatisfactoryState>(`/api/servers/${id}/satisfactory/state`),
+    options: (id: number) =>
+      request<SatisfactoryOptions>(`/api/servers/${id}/satisfactory/options`),
+    applyOptions: (id: number, options: Record<string, string>) =>
+      request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/options`, {
+        method: "PUT",
+        body: JSON.stringify({ options }),
+      }),
+    advancedSettings: (id: number) =>
+      request<SatisfactoryAdvanced>(`/api/servers/${id}/satisfactory/advanced-settings`),
+    applyAdvancedSettings: (
+      id: number,
+      settings: Record<string, unknown>,
+      confirm: boolean
+    ) =>
+      request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/advanced-settings`, {
+        method: "PUT",
+        body: JSON.stringify({ settings, confirm }),
+      }),
+    sessions: (id: number) =>
+      request<SatisfactorySessions>(`/api/servers/${id}/satisfactory/sessions`),
+    save: (id: number, save_name: string) =>
+      request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/save`, {
+        method: "POST",
+        body: JSON.stringify({ save_name }),
+      }),
+    load: (id: number, save_name: string, enable_advanced_game_settings = false) =>
+      request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/load`, {
+        method: "POST",
+        body: JSON.stringify({ save_name, enable_advanced_game_settings }),
+      }),
+    deleteSave: (id: number, saveName: string) =>
+      request<SatisfactoryAction>(
+        `/api/servers/${id}/satisfactory/saves/${encodeURIComponent(saveName)}?confirm=true`,
+        { method: "DELETE" }
+      ),
+    deleteSession: (id: number, sessionName: string) =>
+      request<SatisfactoryAction>(
+        `/api/servers/${id}/satisfactory/sessions/${encodeURIComponent(sessionName)}?confirm=true`,
+        { method: "DELETE" }
+      ),
+    rename: (id: number, server_name: string) =>
+      request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/rename`, {
+        method: "POST",
+        body: JSON.stringify({ server_name }),
+      }),
+    setAutoLoad: (id: number, session_name: string) =>
+      request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/auto-load`, {
+        method: "POST",
+        body: JSON.stringify({ session_name }),
+      }),
+    setClientPassword: (id: number, password: string) =>
+      request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/passwords/client`, {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      }),
+    setAdminPassword: (id: number, password: string) =>
+      request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/passwords/admin`, {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      }),
+    claim: (id: number, server_name: string, admin_password: string) =>
+      request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/claim`, {
+        method: "POST",
+        body: JSON.stringify({ server_name, admin_password }),
+      }),
+    newGame: (
+      id: number,
+      body: {
+        session_name: string;
+        map_name?: string;
+        starting_location?: string;
+        skip_onboarding?: boolean;
+      }
+    ) =>
+      request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/new-game`, {
+        method: "POST",
+        body: JSON.stringify({ ...body, confirm: true }),
+      }),
+    shutdown: (id: number) =>
+      request<SatisfactoryAction>(`/api/servers/${id}/satisfactory/shutdown`, {
+        method: "POST",
+        body: JSON.stringify({ confirm: true }),
+      }),
+  },
 };

@@ -5,11 +5,14 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any, Mapping
 
-from app.server_types.base import QuickButton, ServerFeatures, ServerTypeInfo
+from app.server_types.base import DefaultAdapter, QuickButton, ServerFeatures, ServerTypeInfo
 from app.services.query import QueryError, SourceQuery
 from app.services.rcon import RconError
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -294,7 +297,44 @@ def build_travel_command(
     return f"travel {map_name}?Scenario={scenario}?Lighting={lighting}?game={game_param}"
 
 
-class SandstormAdapter:
+def seed_sandstorm(db: Session) -> None:
+    """First-boot defaults: vanilla + custom checkpoint maps and the type setting."""
+    # Local imports keep this module importable without the DB layer
+    from app.models import MapConfig, Setting
+    from app.seed_data import (
+        CUSTOM_CHECKPOINT_MAPS,
+        VANILLA_CHECKPOINT_MAPS,
+        checkpoint_scenario,
+    )
+
+    have_maps = (
+        db.query(MapConfig).filter(MapConfig.server_type == "sandstorm").count() > 0
+    )
+    if not have_maps:
+        for maps, self_added in (
+            (VANILLA_CHECKPOINT_MAPS, False),
+            (CUSTOM_CHECKPOINT_MAPS, True),
+        ):
+            for alias, map_name in maps:
+                db.add(
+                    MapConfig(
+                        server_type="sandstorm",
+                        alias=alias,
+                        map_name=map_name,
+                        day=True,
+                        night=True,
+                        checkpoint=checkpoint_scenario(alias, "security"),
+                        checkpoint_ins=checkpoint_scenario(alias, "insurgents"),
+                        self_added=self_added,
+                    )
+                )
+
+    key = "type.sandstorm.preferred_gamemode"
+    if db.query(Setting).filter(Setting.key == key).first() is None:
+        db.add(Setting(key=key, value=DEFAULT_PREFERRED_GAMEMODE))
+
+
+class SandstormAdapter(DefaultAdapter):
     info = ServerTypeInfo(
         id="sandstorm",
         label="Insurgency: Sandstorm",
@@ -308,18 +348,43 @@ class SandstormAdapter:
             a2s_query=True,
         ),
         quick_buttons=QUICK_BUTTONS,
+        secret_label="RCON password",
+        endpoint_style="query_rcon",
     )
     allowed_rcon_prefixes = ALLOWED_COMMAND_PREFIXES
+    default_preferred_gamemode = DEFAULT_PREFERRED_GAMEMODE
+    # Honoured from before per-type settings keys existed
+    legacy_preferred_gamemode_key = "preferred_gamemode"
 
-    def is_command_allowed(self, command: str) -> bool:
-        cmd = command.strip().lower()
-        if not cmd:
-            return False
-        first = cmd.split()[0]
-        for prefix in self.allowed_rcon_prefixes:
-            if first == prefix or first.startswith(prefix):
-                return True
-        return False
+    def gamemode_labels(self) -> dict[str, str]:
+        return GAMEMODE_LABELS
+
+    def map_gamemodes(self, map_row: Any) -> dict[str, str]:
+        return map_gamemodes(map_row)
+
+    def map_lightings(self, map_row: Any) -> list[str]:
+        return map_lightings(map_row)
+
+    def build_travel_command(
+        self,
+        *,
+        map_name: str,
+        scenario: str,
+        lighting: str,
+        gamemode_key: str,
+    ) -> str:
+        return build_travel_command(
+            map_name=map_name,
+            scenario=scenario,
+            lighting=lighting,
+            gamemode_key=gamemode_key,
+        )
+
+    def parse_bans(self, text: str) -> list[dict[str, Any]]:
+        return parse_listbans(text)
+
+    def seed(self, db: Session) -> None:
+        seed_sandstorm(db)
 
     def sample_players(
         self,
@@ -328,6 +393,7 @@ class SandstormAdapter:
         rcon_port: int | None = None,
         rcon_password: str = "",
         timeout: float = 3.0,
+        options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Priority:

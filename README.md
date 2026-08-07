@@ -1,8 +1,8 @@
 # RCON Server Manager
 
-Docker-friendly web app for **remote game server stats & control** via **Source Query** and **Source RCON**.
+Docker-friendly web app for **remote game server stats & control** via **Source Query**, **Source RCON** and **HTTPS admin APIs**.
 
-**Insurgency: Sandstorm** is the first supported server type. The architecture is pluggable so additional games can be added as types later.
+Supported server types: **Insurgency: Sandstorm** (A2S + RCON) and **Satisfactory** (HTTPS API). The architecture is pluggable — a new game is one module in `backend/app/server_types/` plus a registry entry.
 
 **Repository:** [SawPsyder/rcon_server_manager](https://github.com/SawPsyder/rcon_server_manager)
 
@@ -18,14 +18,15 @@ Local development without Docker can still use **SQLite** (default when `DATABAS
 ## Features
 
 - Single-admin authentication (session cookie)
-- Multi-server CRUD with **server types** and encrypted RCON passwords
-- Live server status (A2S query) + auto-refresh
-- Continuous player-count sampling + history chart
+- Multi-server CRUD with **server types** and encrypted secrets at rest
+- Live server status (A2S query or HTTPS API, per type) + auto-refresh
+- Continuous player-count sampling + history chart, with public share links
 - Type-aware player list, kick/ban, map travel (Sandstorm)
-- **Persistent RCON connections** (avoids Sandstorm per-connect thread leak)
-- RCON console with per-type command allowlist
+- **Satisfactory admin panel**: server options, advanced game settings, sessions & saves, danger zone
+- **Persistent connections** per transport (avoids Sandstorm per-connect thread leak; caches API bearer tokens)
+- Command console with per-type command allowlist
 - Hybrid config: type defaults + optional per-server preferred gamemode
-- Hardcoded per-type quick RCON buttons (List Players, List Bans, List Maps, Restart Round for Sandstorm)
+- Hardcoded per-type quick command buttons
 
 ## Branches & releases
 
@@ -144,7 +145,18 @@ cd frontend
 npm install
 npm run build
 # copies dist → backend/app/static (gitignored; Docker builds this itself)
+npx tsc --noEmit    # type check only
 ```
+
+### Tests
+
+```bash
+pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+python -m pytest backend/tests -q
+```
+
+No game server is needed — the HTTPS API client is exercised through
+`httpx.MockTransport` and the adapters through injected fakes.
 
 ## Migrate existing SQLite data → Postgres
 
@@ -159,11 +171,32 @@ python scripts/migrate_sqlite_to_postgres.py --sqlite data/app.db
 
 ## Server types
 
-| Type id | Label | Notes |
-|---------|--------|--------|
-| `sandstorm` | Insurgency: Sandstorm | A2S + RCON listplayers, map travel, kick/ban |
+| Type id | Label | Default port(s) | Transport | Notes |
+|---------|--------|-----------------|-----------|--------|
+| `sandstorm` | Insurgency: Sandstorm | 27131 query / 27015 RCON | A2S (UDP) + Source RCON (TCP) | Player list, kick/ban, map travel, ban list |
+| `satisfactory` | Satisfactory | 7777 (one port) | HTTPS API (`POST /api/v1`) | Player **count** only — no roster; server options, saves & sessions, console |
 
-Type defaults live under **Settings**. Individual servers can override preferred gamemode and quick buttons on **Servers**.
+Type defaults live under **Settings**. Individual servers can override preferred gamemode on **Servers**.
+
+The UI adapts from each type's feature flags, so sections that a game cannot support are simply absent rather than broken.
+
+### Satisfactory
+
+Add the server under **Servers** with type *Satisfactory* and **API port** `7777` (the game port — the HTTPS API listens on the same number over TCP).
+
+**Credentials** — the secret field accepts either, and the app detects which you gave it:
+
+- an **API token** from the server console: `server.GenerateAPIToken` (recommended — long-lived, no password stored), or
+- the **admin password**, which is exchanged for a bearer token via `PasswordLogin` and cached in memory.
+
+Leaving it blank only works for a brand-new unclaimed server; use the admin panel's **Claim** action to claim it and store the token it returns.
+
+**TLS** — the dedicated server generates a self-signed certificate unless you install your own under `FactoryGame/Certificates/`, so certificate verification is **off by default**. Two per-server options:
+
+- *Verify TLS certificate* — enable only when the server presents a certificate your system trusts.
+- *Pinned certificate fingerprint* — paste the SHA-256 fingerprint (any of `aa:bb:…`, `AABB…`, spaced) and the app refuses to talk to anything else. This gives real MITM protection without a CA and is the recommended setting for a self-signed server.
+
+**Deliberate limitations** — the API exposes `numConnectedPlayers` and `playerLimit` but never individual players, so player counts and charts work while rosters, presence/playtime tracking, identity lookups and kick/ban do not exist for this type. Save upload/download are not proxied (multi-hundred-MB binary streams).
 
 ## Optional: import from an ISRT SQLite DB
 

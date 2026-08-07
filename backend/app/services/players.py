@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
 
@@ -14,6 +14,7 @@ def sample_player_count(
     rcon_password: str = "",
     timeout: float = 3.0,
     server_type: str | None = None,
+    options: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     adapter = get_adapter(server_type or DEFAULT_SERVER_TYPE)
     return adapter.sample_players(
@@ -22,4 +23,5 @@ def sample_player_count(
         rcon_port=rcon_port,
         rcon_password=rcon_password,
         timeout=timeout,
+        options=options,
     )

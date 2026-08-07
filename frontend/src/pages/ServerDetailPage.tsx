@@ -16,7 +16,30 @@ import BanListPanel from "../components/BanListPanel";
 import IdentityDossierModal from "../components/IdentityDossierModal";
 import IdentityInfoButton from "../components/IdentityInfoButton";
 import PlayerStatsChart from "../components/PlayerStatsChart";
+import TickRateChart from "../components/TickRateChart";
+import SatisfactoryAdminPanel from "../components/SatisfactoryAdminPanel";
 import { overviewBackSearch } from "./OverviewPage";
+
+/** snake_case status extras → readable stat labels. */
+function extraStatLabel(key: string): string {
+  const known: Record<string, string> = {
+    health: "API health",
+    average_tick_rate: "Tick rate",
+    tech_tier: "Tech tier",
+    active_schematic: "Milestone",
+    total_game_duration: "Play time",
+    is_game_running: "Game running",
+    is_game_paused: "Paused",
+    auto_load_session_name: "Auto-load",
+  };
+  if (known[key]) return known[key];
+  return key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+
+function formatExtraStat(value: string | number | boolean | null): string {
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return value === null ? "—" : String(value);
+}
 
 /** Seed status cards immediately from last cached poll (no wait for live query). */
 function statusFromServerCache(server: Server): ServerStatus {
@@ -85,13 +108,33 @@ export default function ServerDetailPage() {
     [servers, validServerId]
   );
 
-  const features = status?.features || {
-    map_travel: false,
-    structured_player_list: false,
-    kick_ban: false,
-    admin_say: false,
-    a2s_query: true,
-  };
+  const serverType = selectedServer?.server_type || status?.server_type || "sandstorm";
+  const typeLabel = useMemo(
+    () => serverTypes.find((t) => t.id === serverType)?.label || serverType,
+    [serverTypes, serverType]
+  );
+
+  // Prefer live status features; fall back to the type registry so charts/panels
+  // still appear while status is cache-seeded or a poll fails.
+  const features = useMemo(() => {
+    const defaults = {
+      map_travel: false,
+      structured_player_list: false,
+      kick_ban: false,
+      admin_say: false,
+      a2s_query: true,
+      admin_api: false,
+      console: true,
+      tick_rate_history: false,
+    };
+    const fromType = serverTypes.find((t) => t.id === serverType)?.features;
+    return { ...defaults, ...fromType, ...status?.features };
+  }, [serverTypes, serverType, status?.features]);
+  /** Game-specific status scalars (tick rate, tech tier, ...) as stat cards. */
+  const extraStats = useMemo(
+    () => Object.entries(status?.extra || {}).filter(([, v]) => v !== null && v !== ""),
+    [status]
+  );
 
   const selectedMap = useMemo(
     () => maps.find((m) => m.id === mapId) || null,
@@ -458,12 +501,27 @@ export default function ServerDetailPage() {
             </div>
           </div>
         )}
+        {extraStats.map(([key, value]) => (
+          <div className="stat card" key={key}>
+            <div className="stat-label">{extraStatLabel(key)}</div>
+            <div className="stat-value">{formatExtraStat(value)}</div>
+          </div>
+        ))}
       </section>
 
       {status?.error && <div className="alert error">{status.error}</div>}
 
       <PlayerStatsChart serverId={validServerId} showShare />
 
+      {/* Separate chart, not a second axis on the player one — tick rate and
+          player count share no scale. */}
+      {features.tick_rate_history && validServerId && (
+        <TickRateChart serverId={validServerId} />
+      )}
+
+      {/* Hidden only for games that expose no per-player data at all
+          (Satisfactory's API returns a count, never a roster). */}
+      {(features.structured_player_list || features.a2s_query) && (
       <section className="card">
         <h2>Players</h2>
         <div className="table-wrap">
@@ -645,6 +703,7 @@ export default function ServerDetailPage() {
           </>
         )}
       </section>
+      )}
 
       {features.map_travel && (
         <section className="card">
@@ -725,8 +784,13 @@ export default function ServerDetailPage() {
         </section>
       )}
 
+      {features.admin_api && validServerId && (
+        <SatisfactoryAdminPanel serverId={validServerId} onChanged={refreshStatus} />
+      )}
+
+      {features.console && (
       <section className="card">
-        <h2>RCON console</h2>
+        <h2>{features.a2s_query ? "RCON console" : `${typeLabel} console`}</h2>
         <div className="row wrap">
           {quickButtons.map((b) => (
             <button
@@ -744,7 +808,9 @@ export default function ServerDetailPage() {
             className="grow"
             value={rconCmd}
             onChange={(e) => setRconCmd(e.target.value)}
-            placeholder="Enter RCON command…"
+            placeholder={
+              features.a2s_query ? "Enter RCON command…" : "Enter console command…"
+            }
             onKeyDown={(e) => {
               if (e.key === "Enter" && rconCmd.trim()) runRcon(rconCmd.trim());
             }}
@@ -796,8 +862,9 @@ export default function ServerDetailPage() {
             </button>
           </div>
         )}
-        <pre className="console-out">{output || "RCON output will appear here."}</pre>
+        <pre className="console-out">{output || "Command output will appear here."}</pre>
       </section>
+      )}
 
       {features.kick_ban && (
         <BanListPanel

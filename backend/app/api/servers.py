@@ -8,14 +8,24 @@ from app.schemas import (
     QuickButtonOut,
     ServerCreate,
     ServerFeaturesOut,
+    ServerOptionsOut,
     ServerOut,
     ServerTypeOut,
     ServerUpdate,
 )
 from app.security import decrypt_secret, encrypt_secret
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter, is_known_type, list_server_types
+from app.services.server_options import load_options, merge_options
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
+
+
+def _options_out(server: Server) -> ServerOptionsOut:
+    options = load_options(server)
+    return ServerOptionsOut(
+        verify_tls=bool(options.get("verify_tls", False)),
+        cert_fingerprint=str(options.get("cert_fingerprint", "") or ""),
+    )
 
 
 def _to_out(server: Server) -> ServerOut:
@@ -28,6 +38,7 @@ def _to_out(server: Server) -> ServerOut:
         server_type=server.server_type or DEFAULT_SERVER_TYPE,
         preferred_gamemode=server.preferred_gamemode,
         has_rcon_password=bool(server.rcon_password_enc),
+        options=_options_out(server),
         last_hostname=getattr(server, "last_hostname", None),
         last_map=getattr(server, "last_map", None),
         last_lighting=getattr(server, "last_lighting", None),
@@ -49,6 +60,24 @@ def _validate_type(type_id: str) -> str:
     return tid
 
 
+def _normalize_ports(server: Server) -> None:
+    """Single-port games (one HTTPS API port) keep both port columns in sync."""
+    adapter = get_adapter(server.server_type or DEFAULT_SERVER_TYPE)
+    if adapter.info.endpoint_style == "single_port":
+        server.rcon_port = server.query_port
+
+
+def _apply_options(server: Server, options) -> None:
+    if options is None:
+        return
+    updates = options.model_dump(exclude_unset=True)
+    if "cert_fingerprint" in updates:
+        from app.services.satisfactory_api import normalize_fingerprint
+
+        updates["cert_fingerprint"] = normalize_fingerprint(updates["cert_fingerprint"])
+    merge_options(server, updates)
+
+
 @router.get("/types", response_model=list[ServerTypeOut])
 def server_types(_admin: str = Depends(require_admin)) -> list[ServerTypeOut]:
     out: list[ServerTypeOut] = []
@@ -64,6 +93,8 @@ def server_types(_admin: str = Depends(require_admin)) -> list[ServerTypeOut]:
                     QuickButtonOut(label=b.label, command=b.command)
                     for b in info.quick_buttons
                 ],
+                secret_label=info.secret_label,
+                endpoint_style=info.endpoint_style,
             )
         )
     return out
@@ -93,6 +124,8 @@ def create_server(
         preferred_gamemode=preferred,
         options_json="{}",
     )
+    _apply_options(server, body.options)
+    _normalize_ports(server)
     db.add(server)
     db.commit()
     db.refresh(server)
@@ -118,19 +151,22 @@ def update_server(
     db: Session = Depends(get_db),
     _admin: str = Depends(require_admin),
 ) -> ServerOut:
-    from app.services.rcon_pool import rcon_pool
-
     server = db.get(Server, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
-    # Drop old persistent session if endpoint or password changes
+    # Drop pooled connections if the endpoint, secret or TLS settings change
     old_host, old_port = server.host, server.rcon_port
+    old_adapter = get_adapter(server.server_type or DEFAULT_SERVER_TYPE)
     endpoint_changed = False
     if body.host is not None and body.host.strip() != server.host:
         endpoint_changed = True
     if body.rcon_port is not None and body.rcon_port != server.rcon_port:
         endpoint_changed = True
-    if body.rcon_password is not None:
+    if body.query_port is not None and body.query_port != server.query_port:
+        endpoint_changed = True
+    if body.rcon_password is not None or body.options is not None:
+        endpoint_changed = True
+    if body.server_type is not None and body.server_type != server.server_type:
         endpoint_changed = True
 
     if body.name is not None:
@@ -149,12 +185,17 @@ def update_server(
         server.preferred_gamemode = body.preferred_gamemode.strip() or None
     if body.rcon_password is not None:
         server.rcon_password_enc = encrypt_secret(body.rcon_password) if body.rcon_password else ""
+    _apply_options(server, body.options)
+    _normalize_ports(server)
     db.commit()
     db.refresh(server)
+    new_adapter = get_adapter(server.server_type or DEFAULT_SERVER_TYPE)
     if endpoint_changed:
-        rcon_pool.invalidate_endpoint(old_host, old_port)
+        old_adapter.invalidate_connections(old_host, old_port)
+        if new_adapter is not old_adapter:
+            new_adapter.invalidate_connections(old_host, old_port)
         if server.host != old_host or server.rcon_port != old_port:
-            rcon_pool.invalidate_endpoint(server.host, server.rcon_port)
+            new_adapter.invalidate_connections(server.host, server.rcon_port)
     return _to_out(server)
 
 
@@ -164,15 +205,14 @@ def delete_server(
     db: Session = Depends(get_db),
     _admin: str = Depends(require_admin),
 ) -> None:
-    from app.services.rcon_pool import rcon_pool
-
     server = db.get(Server, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
     host, port = server.host, server.rcon_port
+    adapter = get_adapter(server.server_type or DEFAULT_SERVER_TYPE)
     db.delete(server)
     db.commit()
-    rcon_pool.invalidate_endpoint(host, port)
+    adapter.invalidate_connections(host, port)
 
 
 def get_server_or_404(db: Session, server_id: int) -> Server:

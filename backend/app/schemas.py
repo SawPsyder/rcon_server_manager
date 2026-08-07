@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +23,9 @@ class ServerFeaturesOut(BaseModel):
     kick_ban: bool = False
     admin_say: bool = False
     a2s_query: bool = True
+    admin_api: bool = False
+    console: bool = True
+    tick_rate_history: bool = False
 
 
 class QuickButtonOut(BaseModel):
@@ -36,6 +40,20 @@ class ServerTypeOut(BaseModel):
     default_rcon_port: int
     features: ServerFeaturesOut
     quick_buttons: list[QuickButtonOut] = Field(default_factory=list)
+    secret_label: str = "RCON password"
+    endpoint_style: str = "query_rcon"
+
+
+class ServerOptionsIn(BaseModel):
+    """Per-server connection extras (stored in servers.options_json)."""
+
+    verify_tls: bool | None = None
+    cert_fingerprint: str | None = Field(default=None, max_length=128)
+
+
+class ServerOptionsOut(BaseModel):
+    verify_tls: bool = False
+    cert_fingerprint: str = ""
 
 
 class ServerCreate(BaseModel):
@@ -46,6 +64,7 @@ class ServerCreate(BaseModel):
     rcon_password: str = ""
     server_type: str = "sandstorm"
     preferred_gamemode: str | None = Field(default=None, max_length=64)
+    options: ServerOptionsIn | None = None
 
 
 class ServerUpdate(BaseModel):
@@ -58,6 +77,7 @@ class ServerUpdate(BaseModel):
     preferred_gamemode: str | None = None
     # Explicit clear of per-server preferred_gamemode (null override)
     clear_preferred_gamemode: bool = False
+    options: ServerOptionsIn | None = None
 
 
 class ServerOut(BaseModel):
@@ -69,6 +89,7 @@ class ServerOut(BaseModel):
     server_type: str
     preferred_gamemode: str | None = None
     has_rcon_password: bool
+    options: ServerOptionsOut = Field(default_factory=ServerOptionsOut)
     # Cached from last successful status poll (instant UI)
     last_hostname: str | None = None
     last_map: str | None = None
@@ -129,6 +150,95 @@ class ServerStatus(BaseModel):
     # True when values are served from DB cache (pre-live or offline fallback)
     from_cache: bool = False
     last_status_at: datetime | None = None
+    # Game-specific scalars with no column of their own (tick rate, tier, ...)
+    extra: dict[str, Any] | None = None
+
+
+class SatisfactoryHealthOut(BaseModel):
+    health: str = ""
+    server_custom_data: str = ""
+
+
+class SatisfactoryStateOut(BaseModel):
+    active_session_name: str = ""
+    num_connected_players: int = 0
+    player_limit: int = 0
+    tech_tier: int = 0
+    active_schematic: str = ""
+    game_phase: str = ""
+    is_game_running: bool = False
+    total_game_duration: int = 0
+    is_game_paused: bool = False
+    average_tick_rate: float = 0.0
+    auto_load_session_name: str = ""
+
+
+class SatisfactoryOptionsOut(BaseModel):
+    server_options: dict[str, str] = Field(default_factory=dict)
+    pending_server_options: dict[str, str] = Field(default_factory=dict)
+
+
+class SatisfactoryOptionsUpdate(BaseModel):
+    options: dict[str, str] = Field(min_length=1)
+
+
+class SatisfactoryAdvancedOut(BaseModel):
+    creative_mode_enabled: bool = False
+    advanced_game_settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class SatisfactoryAdvancedUpdate(BaseModel):
+    settings: dict[str, Any] = Field(min_length=1)
+    # Applying these permanently marks the save as "edited"
+    confirm: bool = False
+
+
+class SatisfactorySessionsOut(BaseModel):
+    sessions: list[dict[str, Any]] = Field(default_factory=list)
+    current_session_index: int = -1
+
+
+class SatisfactoryActionOut(BaseModel):
+    ok: bool = True
+    detail: str = ""
+
+
+class SaveGameRequest(BaseModel):
+    save_name: str = Field(min_length=1, max_length=255)
+
+
+class LoadGameRequest(BaseModel):
+    save_name: str = Field(min_length=1, max_length=255)
+    enable_advanced_game_settings: bool = False
+
+
+class ConfirmRequest(BaseModel):
+    confirm: bool = False
+
+
+class RenameServerRequest(BaseModel):
+    server_name: str = Field(min_length=1, max_length=255)
+
+
+class SetPasswordRequest(BaseModel):
+    password: str = ""
+
+
+class AutoLoadRequest(BaseModel):
+    session_name: str = ""
+
+
+class ClaimServerRequest(BaseModel):
+    server_name: str = Field(min_length=1, max_length=255)
+    admin_password: str = Field(min_length=1, max_length=255)
+
+
+class NewGameRequest(BaseModel):
+    session_name: str = Field(min_length=1, max_length=255)
+    map_name: str = ""
+    starting_location: str = ""
+    skip_onboarding: bool = True
+    confirm: bool = False
 
 
 class RconCommandRequest(BaseModel):
