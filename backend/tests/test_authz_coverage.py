@@ -95,6 +95,7 @@ def test_connection_settings_routes_are_admin_only():
         ("PUT", "/api/servers/{server_id}"),
         ("DELETE", "/api/servers/{server_id}"),
         ("PUT", "/api/settings"),
+        ("GET", "/api/settings/client-ip"),
         # These two rotate servers.rcon_password_enc from inside the game panel.
         ("POST", "/api/servers/{server_id}/satisfactory/passwords/admin"),
         ("POST", "/api/servers/{server_id}/satisfactory/claim"),

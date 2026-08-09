@@ -1,14 +1,15 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api, AppSettings } from "../api";
 import { useAuth } from "../auth";
+import ClientIpHelpersPanel from "../components/ClientIpHelpersPanel";
 import MailSettingsPanel from "../components/MailSettingsPanel";
 
-type Tab = "general" | "email";
+type Tab = "general" | "email" | "helpers";
 
 export default function SettingsPage() {
   // Everyone can read the general settings (the dashboard needs the poll
   // interval); only administrators can change them, and only administrators
-  // see the email tab at all. Your own password lives on /account.
+  // see the email and helpers tabs. Your own password lives on /account.
   const { isAdmin, reloadConfig } = useAuth();
   const [tab, setTab] = useState<Tab>("general");
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -41,7 +42,12 @@ export default function SettingsPage() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "general", label: "General" },
-    ...(isAdmin ? [{ id: "email" as Tab, label: "Email" }] : []),
+    ...(isAdmin
+      ? [
+          { id: "email" as Tab, label: "Email" },
+          { id: "helpers" as Tab, label: "Helpers" },
+        ]
+      : []),
   ];
 
   return (
@@ -70,6 +76,8 @@ export default function SettingsPage() {
       {tab === "email" && isAdmin && (
         <MailSettingsPanel onSaved={() => void reloadConfig()} />
       )}
+
+      {tab === "helpers" && isAdmin && <ClientIpHelpersPanel />}
 
       {tab === "general" && (
         <>

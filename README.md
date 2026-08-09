@@ -130,7 +130,7 @@ services:
       # Optional Cloudflare Turnstile - both must be set or it stays off
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
       TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
-      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
     volumes:
       - /change/me/rcon_manager:/data
 
@@ -157,7 +157,7 @@ networks:
 | `DATABASE_URL` | No | Full SQLAlchemy URL; if unset, built from `POSTGRES_*` when `POSTGRES_HOST` is set |
 | `RESET_TOKEN_TTL_MINUTES` / `INVITE_TOKEN_TTL_HOURS` | No | Link lifetimes (defaults `60` / `72`) |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | No | Cloudflare Turnstile. **Both** must be set or Turnstile is not used. Gates sign-in, password-reset requests and the admin claim |
-| `TRUSTED_PROXY_IPS` | No | Comma-separated reverse-proxy addresses whose `X-Forwarded-For` may be trusted for client-IP detection. Empty (default) means trust none and use the socket peer |
+| `CLIENT_IP_HEADER` | No | HTTP header that carries the real client IP when behind a reverse proxy (e.g. `CF-Connecting-IP` for Cloudflare). Empty (default) means no proxy — use the TCP peer. Only set when clients cannot reach the app directly. Use **Settings → Helpers** to see which IP headers arrive on your requests |
 
 ---
 
@@ -230,8 +230,10 @@ development use Cloudflare's always-passes test pair (site key `1x00000000000000
 secret `1x0000000000000000000000000000000AA`), or simply leave both variables unset.
 
 Verification always happens server-side; the browser never talks to `siteverify`. If your
-deployment sits behind a reverse proxy, set `TRUSTED_PROXY_IPS` so the client IP passed to
-Cloudflare is the real visitor rather than the proxy.
+deployment sits behind Cloudflare (or another reverse proxy), set `CLIENT_IP_HEADER` so the
+client IP passed to Turnstile is the real visitor rather than the proxy hop. For Cloudflare
+the usual value is `CF-Connecting-IP`. Leave it empty when nothing sits in front of the app.
+Confirm which headers arrive under **Settings → Helpers**.
 
 To confirm the secret reached the backend, redeem a deliberately invalid token:
 

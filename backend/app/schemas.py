@@ -163,10 +163,6 @@ class InviteLinkOut(BaseModel):
     emailed: bool = False
 
 
-class TestEmailRequest(BaseModel):
-    to_address: str = Field(min_length=1, max_length=320)
-
-
 class MailSettingsOut(BaseModel):
     host: str = ""
     port: int = 587
@@ -193,7 +189,7 @@ class MailSettingsUpdate(BaseModel):
     starttls: bool = True
     ssl: bool = False
     from_address: str = Field(default="", max_length=320)
-    from_name: str = Field(default="Sandstorm Server Manager", max_length=120)
+    from_name: str = Field(default="RCON Server Manager", max_length=120)
     base_url: str = Field(default="", max_length=255)
 
 
@@ -747,3 +743,20 @@ class SettingsUpdate(BaseModel):
     poll_interval_seconds: int | None = Field(default=None, ge=3, le=120)
     stats_interval_seconds: int | None = Field(default=None, ge=15, le=3600)
     types: dict[str, TypeSettingsUpdate] | None = None
+
+
+class ClientIpHeaderValue(BaseModel):
+    """One candidate client-IP header and what this request carried for it."""
+
+    name: str
+    present: bool
+    value: str | None = None
+
+
+class ClientIpDebugOut(BaseModel):
+    """Admin helper: which IP headers arrived and what client_ip() resolves to."""
+
+    configured_header: str
+    socket_peer: str
+    resolved_client_ip: str
+    headers: list[ClientIpHeaderValue] = Field(default_factory=list)

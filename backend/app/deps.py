@@ -24,18 +24,20 @@ def _unauthenticated() -> HTTPException:
 def client_ip(request: Request) -> str:
     """Best-effort caller address for rate limiting and Turnstile remoteip.
 
-    X-Forwarded-For is only honoured when the immediate peer is listed in
-    TRUSTED_PROXY_IPS. Anyone can send that header, so trusting it unconditionally
-    would let a caller rotate their apparent address and walk straight through
-    every per-IP limit. Empty config means trust nothing.
+    When CLIENT_IP_HEADER is set, that header's value is used (first hop of a
+    comma-separated list, for headers such as X-Forwarded-For). Empty config
+    means the app is not behind a proxy: the TCP peer is the client.
+
+    Only set the header when every request reaches the app through a proxy that
+    overwrites it. If clients can open a TCP connection directly, they can spoof
+    the header and walk through every per-IP limit.
     """
-    peer = request.client.host if request.client else ""
-    trusted = get_settings().trusted_proxies
-    if peer and peer in trusted:
-        forwarded = request.headers.get("x-forwarded-for", "")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-    return peer
+    header_name = get_settings().resolved_client_ip_header
+    if header_name:
+        raw = (request.headers.get(header_name) or "").strip()
+        if raw:
+            return raw.split(",")[0].strip()
+    return request.client.host if request.client else ""
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
