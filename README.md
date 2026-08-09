@@ -22,6 +22,7 @@ A self-hosted **web admin dashboard** for managing game servers from one place.
 - Encrypted server credentials at rest
 - Optional Steam persona name lookup
 - Palworld interactive world map with share links and permanent-only bans
+- Multi-user auth with invites, 2FA, mail, and server grants
 <!-- FEATURES:END -->
 
 Game-specific admin tools (player control, map travel, saves, etc.) depend on the server type - see below.
