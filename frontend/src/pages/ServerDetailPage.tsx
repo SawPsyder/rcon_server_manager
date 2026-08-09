@@ -15,6 +15,7 @@ import {
 import BanListPanel from "../components/BanListPanel";
 import IdentityDossierModal from "../components/IdentityDossierModal";
 import IdentityInfoButton from "../components/IdentityInfoButton";
+import MapPopularityPanel from "../components/MapPopularityPanel";
 import PlayerStatsChart from "../components/PlayerStatsChart";
 import TickRateChart from "../components/TickRateChart";
 import PalworldAdminPanel from "../components/PalworldAdminPanel";
@@ -877,6 +878,11 @@ export default function ServerDetailPage() {
           </div>
         </section>
       )}
+
+      {/* Map popularity needs A2S map identity on samples (Sandstorm). */}
+      {features.a2s_query && validServerId ? (
+        <MapPopularityPanel serverId={validServerId} />
+      ) : null}
 
       {AdminPanel && validServerId && (
         <AdminPanel serverId={validServerId} onChanged={refreshStatus} />

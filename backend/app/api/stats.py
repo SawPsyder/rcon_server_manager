@@ -1,4 +1,4 @@
-"""Player count history API for charts."""
+"""Player count history and map popularity APIs."""
 
 from __future__ import annotations
 
@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.api.servers import get_server_or_404
 from app.database import get_db
-from app.models import PlayerCountSample
+from app.models import MapConfig, PlayerCountSample, Server
+from app.server_types import DEFAULT_SERVER_TYPE
+from app.services.map_stats import (
+    DEFAULT_MIN_ACTIVE_MINUTES,
+    aggregate_map_stats,
+)
 from app.services.roster import roster_from_json, roster_names
 
 router = APIRouter(prefix="/api/servers", tags=["stats"])
@@ -206,3 +211,116 @@ def player_stats(
 ) -> PlayerStatsOut:
     get_server_or_404(db, server_id)
     return build_player_stats(db, server_id, range)
+
+
+class MapStatRowOut(BaseModel):
+    map_name: str
+    gamemode: str = ""
+    alias: str | None = None
+    player_minutes: float
+    active_minutes: float
+    avg_players: float
+    peak_players: int
+    active_samples: int
+    qualified: bool
+
+
+class MapStatsOut(BaseModel):
+    server_id: int
+    range: str
+    from_time: datetime
+    to_time: datetime
+    min_active_minutes: float
+    combine_gamemodes: bool
+    # Earliest sample in range that has a map tag (null if none yet)
+    data_since: datetime | None = None
+    rows: list[MapStatRowOut] = Field(default_factory=list)
+
+
+def _alias_lookup(db: Session, server: Server) -> dict[str, str]:
+    st = getattr(server, "server_type", None) or DEFAULT_SERVER_TYPE
+    rows = (
+        db.query(MapConfig.map_name, MapConfig.alias)
+        .filter(MapConfig.server_type == st)
+        .all()
+    )
+    out: dict[str, str] = {}
+    for map_name, alias in rows:
+        name = (map_name or "").strip()
+        label = (alias or "").strip()
+        if name and label:
+            out[name] = label
+    return out
+
+
+@router.get("/{server_id}/map-stats", response_model=MapStatsOut)
+def map_stats(
+    server_id: int,
+    range: str = Query(default="7d", pattern="^(24h|7d|30d|180d|1y)$"),
+    combine_gamemodes: bool = Query(default=False),
+    min_active_minutes: float = Query(
+        default=DEFAULT_MIN_ACTIVE_MINUTES,
+        ge=0,
+        le=24 * 60,
+    ),
+    db: Session = Depends(get_db),
+) -> MapStatsOut:
+    """
+    Player-weighted map popularity for the selected window.
+
+    Empty samples are excluded. Default sort prefers maps with at least
+    ``min_active_minutes`` of non-empty exposure, ranked by avg concurrent
+    players (not cycle frequency or admin travel).
+    """
+    if range not in RANGE_DELTAS:
+        raise HTTPException(status_code=400, detail="Invalid range")
+
+    server = get_server_or_404(db, server_id)
+    now = datetime.now(timezone.utc)
+    from_time = now - RANGE_DELTAS[range]
+
+    rows = (
+        db.query(PlayerCountSample)
+        .filter(
+            PlayerCountSample.server_id == server_id,
+            PlayerCountSample.recorded_at >= from_time,
+            PlayerCountSample.recorded_at <= now,
+        )
+        .order_by(PlayerCountSample.recorded_at.asc())
+        .all()
+    )
+
+    result = aggregate_map_stats(
+        rows,
+        server_id=server_id,
+        range_key=range,
+        from_time=from_time,
+        to_time=now,
+        combine_gamemodes=combine_gamemodes,
+        min_active_minutes=min_active_minutes,
+        alias_by_map=_alias_lookup(db, server),
+    )
+
+    return MapStatsOut(
+        server_id=result.server_id,
+        range=result.range,
+        from_time=result.from_time,
+        to_time=result.to_time,
+        min_active_minutes=result.min_active_minutes,
+        combine_gamemodes=result.combine_gamemodes,
+        data_since=result.data_since,
+        rows=[
+            MapStatRowOut(
+                map_name=r.map_name,
+                gamemode=r.gamemode,
+                alias=r.alias,
+                player_minutes=r.player_minutes,
+                active_minutes=r.active_minutes,
+                avg_players=r.avg_players,
+                peak_players=r.peak_players,
+                active_samples=r.active_samples,
+                qualified=r.qualified,
+            )
+            for r in result.rows
+        ],
+    )

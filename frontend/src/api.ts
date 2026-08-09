@@ -435,6 +435,32 @@ export type PlayerStats = {
   avg_tick_rate?: number | null;
 };
 
+/** Player-weighted map popularity row (empty samples excluded). */
+export type MapStatRow = {
+  map_name: string;
+  gamemode: string;
+  alias: string | null;
+  player_minutes: number;
+  active_minutes: number;
+  avg_players: number;
+  peak_players: number;
+  active_samples: number;
+  /** Met min active-minutes floor used for default ranking. */
+  qualified: boolean;
+};
+
+export type MapStats = {
+  server_id: number;
+  range: StatsRange;
+  from_time: string;
+  to_time: string;
+  min_active_minutes: number;
+  combine_gamemodes: boolean;
+  /** Earliest map-tagged sample in range; null until capture has data. */
+  data_since: string | null;
+  rows: MapStatRow[];
+};
+
 export type ChartShare = {
   token: string;
   url_path: string;
@@ -880,6 +906,18 @@ export const api = {
   status: (id: number) => request<ServerStatus>(`/api/servers/${id}/status`),
   playerStats: (id: number, range: StatsRange = "24h") =>
     request<PlayerStats>(`/api/servers/${id}/player-stats?range=${range}`),
+  mapStats: (
+    id: number,
+    range: StatsRange = "7d",
+    opts?: { combineGamemodes?: boolean; minActiveMinutes?: number }
+  ) => {
+    const q = new URLSearchParams({ range });
+    if (opts?.combineGamemodes) q.set("combine_gamemodes", "true");
+    if (opts?.minActiveMinutes != null) {
+      q.set("min_active_minutes", String(opts.minActiveMinutes));
+    }
+    return request<MapStats>(`/api/servers/${id}/map-stats?${q.toString()}`);
+  },
 
   createChartShare: (id: number) =>
     request<ChartShare>(`/api/servers/${id}/chart-share`, { method: "POST" }),
