@@ -301,18 +301,20 @@ def analyse(
     last = last_release_tag()
     last_ver = Version.parse(last) if last else None
 
-    # Resolve tip of develop for the commit range (prefer remote after fetch)
+    # Resolve tip of develop for the commit range.
+    # Prefer the local branch (after optional pull) so unpushed commits still
+    # count. Using origin/* alone mis-tags when develop is ahead of remote -
+    # that path produced empty changelogs and wrong patch bumps.
     remote_tip = f"origin/{base}"
-    has_remote = git("rev-parse", "--verify", remote_tip, check=False)
-    local_tip = git("rev-parse", "--verify", base, check=False)
-    if update_working_copy and local_tip:
-        git("checkout", base, check=False)
-        run(["git", "pull", "--ff-only", "origin", base], check=False)
-        tip = "HEAD"
+    has_remote = bool(git("rev-parse", "--verify", remote_tip, check=False))
+    local_tip = bool(git("rev-parse", "--verify", base, check=False))
+    if local_tip:
+        if update_working_copy:
+            git("checkout", base, check=False)
+            run(["git", "pull", "--ff-only", "origin", base], check=False)
+        tip = base
     elif has_remote:
         tip = remote_tip
-    elif local_tip:
-        tip = base
     else:
         tip = "HEAD"
 
@@ -520,12 +522,21 @@ def cmd_release(args: argparse.Namespace) -> int:
     # --- live path ---
     run(["git", "checkout", develop])
     run(["git", "pull", "--ff-only", "origin", develop], check=False)
+    # Publish local develop first so origin matches what we ship and README
+    # commits land on a branch that remote already knows.
+    run(["git", "push", "origin", develop], check=False)
 
-    # Re-analyse on the tip we actually ship
+    # Re-analyse on the local tip we actually ship (not a stale origin/*).
     a = analyse(bump=args.bump, base=develop, update_working_copy=False)
     new_ver = resolve_version(a, args.bump, args.version)
     new_tag = new_ver.tag()
     notes = a.changelog_markdown(new_tag)
+
+    if not a.commits and not args.allow_empty:
+        raise CmdError(
+            "No commits since last release after sync. "
+            "Push develop first if work is only local, or use --allow-empty."
+        )
 
     added = apply_readme_feature_update(a, dry_run=False, skip=args.skip_readme)
     if added:
