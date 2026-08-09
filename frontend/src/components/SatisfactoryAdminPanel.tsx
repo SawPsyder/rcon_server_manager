@@ -355,7 +355,7 @@ export default function SatisfactoryAdminPanel({ serverId, onChanged }: Props) {
   return (
     <section className="card">
       <div className="row between wrap">
-        <h2 style={{ margin: 0 }}>Satisfactory server admin</h2>
+        <h2 style={{ margin: 0 }}>Server Details</h2>
         <div className="row wrap">
           {TABS.map((t) => (
             <button

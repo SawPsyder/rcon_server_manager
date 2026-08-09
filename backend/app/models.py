@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -182,6 +183,9 @@ class Server(Base):
     player_samples: Mapped[list["PlayerCountSample"]] = relationship(
         back_populates="server", cascade="all, delete-orphan"
     )
+    pterodactyl_samples: Mapped[list["PterodactylSample"]] = relationship(
+        back_populates="server", cascade="all, delete-orphan"
+    )
     custom_buttons: Mapped[list["CustomButton"]] = relationship(
         back_populates="server", cascade="all, delete-orphan"
     )
@@ -209,6 +213,47 @@ class PlayerCountSample(Base):
     tick_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     server: Mapped[Server] = relationship(back_populates="player_samples")
+
+
+class PterodactylSample(Base):
+    """Container utilisation history for servers linked to a Pterodactyl panel.
+
+    Its own table rather than columns on :class:`PlayerCountSample`, because the
+    two run on different clocks: player counts are sampled once a minute, while
+    the panel poller runs every 20 seconds to match the panel's own cache. Rows
+    arrive roughly three times as fast, so the read path buckets in SQL instead
+    of loading a range into memory the way the player chart does.
+
+    Values are raw upstream readings, not percentages. ``cpu_absolute`` is
+    host-relative (100.0 is one full core) and the limits it would be divided by
+    can change, so a stored percentage would silently rewrite history.
+    """
+
+    __tablename__ = "pterodactyl_samples"
+    __table_args__ = (
+        Index("ix_pterodactyl_samples_server_time", "server_id", "recorded_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False, index=True
+    )
+    # running | starting | stopping | offline
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="offline")
+    cpu_absolute: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    memory_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    disk_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # Cumulative for the container's current lifetime; both reset to 0 on
+    # restart, which is why uptime is stored beside them - a drop in uptime is
+    # the reliable restart marker for anyone differencing these into a rate.
+    network_rx_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    network_tx_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    uptime_ms: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+
+    server: Mapped[Server] = relationship(back_populates="pterodactyl_samples")
 
 
 class ChartShare(Base):

@@ -3,8 +3,9 @@ import { api, AppSettings } from "../api";
 import { useAuth } from "../auth";
 import ClientIpHelpersPanel from "../components/ClientIpHelpersPanel";
 import MailSettingsPanel from "../components/MailSettingsPanel";
+import PterodactylSettingsPanel from "../components/PterodactylSettingsPanel";
 
-type Tab = "general" | "email" | "helpers";
+type Tab = "general" | "email" | "pterodactyl" | "helpers";
 
 export default function SettingsPage() {
   // Everyone can read the general settings (the dashboard needs the poll
@@ -45,6 +46,7 @@ export default function SettingsPage() {
     ...(isAdmin
       ? [
           { id: "email" as Tab, label: "Email" },
+          { id: "pterodactyl" as Tab, label: "Pterodactyl" },
           { id: "helpers" as Tab, label: "Helpers" },
         ]
       : []),
@@ -76,6 +78,8 @@ export default function SettingsPage() {
       {tab === "email" && isAdmin && (
         <MailSettingsPanel onSaved={() => void reloadConfig()} />
       )}
+
+      {tab === "pterodactyl" && isAdmin && <PterodactylSettingsPanel />}
 
       {tab === "helpers" && isAdmin && <ClientIpHelpersPanel />}
 

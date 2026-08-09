@@ -247,3 +247,94 @@ curl -sS -X POST https://challenges.cloudflare.com/turnstile/v0/siteverify \
 
 `{"success":false,"error-codes":["invalid-input-response"]}` means the secret is correct.
 `invalid-input-secret` means it is not.
+
+---
+
+## Pterodactyl panel
+
+If your servers run under [Pterodactyl](https://pterodactyl.io/) (or the
+[Pelican](https://pelican.dev/) fork), the app can read each container's
+resource usage and send power signals. Provisioning, eggs and schedules stay in
+the panel — this only watches and signals.
+
+**1. Create a Client API key.** In the panel, go to **Account Settings → API
+Credentials** and create a key. It looks like `ptlc_…` (Pelican issues `pacc_…`).
+
+> An **Application** API key from the panel's admin area will *not* work. It has
+> no resource endpoint and no power endpoint, however much access it carries.
+> This is the most common setup mistake.
+
+**2. Connect.** In this app, go to **Settings → Pterodactyl**, enter the panel's
+base URL (`https://panel.example.com`, no path) and the key, then press *Test
+connection*. The test reports how many servers the key can see, which is the
+quickest way to tell you used the right kind of key on the right account.
+
+Leave *Verify the panel's TLS certificate* on unless the panel uses a
+self-signed certificate.
+
+**3. Link a server.** Under **Servers**, edit a server and pick its container
+from the *Pterodactyl container* dropdown. Any server type can be linked.
+
+Linked servers gain, on their detail page:
+
+- a **Container** card — state, CPU, memory, disk, network totals and uptime
+- **Start / Restart / Stop** buttons, and **Kill** for administrators
+- a **Container load** chart at the same 20-second resolution
+
+### How the numbers get there
+
+A background poller reads every linked container **every 20 seconds**, whether
+or not anyone has the page open. Both the card and the chart are views onto
+what it fetched, so they cannot disagree, and history keeps accruing while
+nobody is watching — which is when the outage you want to look at happens.
+Nothing on a request path talks to the panel; opening ten browser tabs costs
+the panel nothing.
+
+- **Readings can be up to ~40 seconds old.** The poll interval is 20 seconds
+  and the panel caches its own resource response for 20 seconds on top. The
+  card shows when its reading was actually taken rather than implying it is
+  live. This is also why the state pill trails a restart.
+- **Power actions are asynchronous.** The panel returns "accepted" the moment
+  its daemon takes the signal, so the UI says *"Restart requested"* rather than
+  claiming it happened, then polls faster for a minute to catch the change.
+- **Network counters reset on restart.** They are cumulative for the
+  container's current lifetime, so they are shown as totals "since start"
+  rather than as a transfer rate. (The counters and uptime *are* recorded, so
+  deriving a rate later needs no new data — only a restart-aware diff.)
+- **Rate limit.** The panel allows 256 requests/minute per key. The poller
+  spends 3/min per linked server plus 0.2/min to refresh its limits, so a
+  25-server panel sits around 80/min. Past roughly 55 linked servers the
+  poller stretches its own interval to stay inside the budget rather than
+  locking the key out, and logs when it does.
+- **Storage.** Samples accrue at about 4,300 rows per day per linked server.
+  The chart endpoint buckets them in SQL, so a one-year range costs the same
+  to render as a one-day one, but there is no pruning yet — worth watching if
+  you link a lot of servers and keep them for years.
+
+### Who can do what
+
+| | Admin | Granted operator |
+|---|---|---|
+| Configure the panel connection | ✅ | — |
+| Choose which container a server links to | ✅ | — |
+| See the resource card and load chart | ✅ | ✅ |
+| Start / Restart / Stop | ✅ | ✅ |
+| Kill (SIGKILL, no clean shutdown) | ✅ | — |
+
+Operators can already stop a server through RCON, so withholding the way back
+up would only mean waking an admin at 2am. Every power action — including one
+the panel refuses — is written to the server's command history with the actor.
+
+### Trying it without a panel
+
+`scripts/fake_pterodactyl_panel.py` stands in for a real panel. It is stdlib
+only, serves the real response shapes, reproduces the 20-second cache and the
+asynchronous power transitions, and has flags for the failure modes
+(`--reject-auth`, `--rate-limit`, `--wings-down`, `--suspend`, `--installing`,
+`--not-a-panel`, `--slow`):
+
+```sh
+python scripts/fake_pterodactyl_panel.py --port 8099
+```
+
+Then use `http://localhost:8099` as the panel URL with any non-empty key.

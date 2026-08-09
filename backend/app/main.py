@@ -13,8 +13,10 @@ from app.api import (
     map_share,
     maps,
     palworld,
+    pterodactyl,
     rcon,
     satisfactory,
+    server_pterodactyl,
     servers,
     settings,
     stats,
@@ -25,6 +27,7 @@ from app.bootstrap import ensure_admin, seed_if_empty
 from app.database import Base, SessionLocal, engine, wait_for_database
 from app.deps import get_current_user, require_server_scope
 from app.migrate import run_migrations
+from app.services.pterodactyl_poller import poller as pterodactyl_poller
 from app.services.stats_collector import collector
 
 app = FastAPI(title="RCON Server Manager", version="0.2.0")
@@ -54,6 +57,7 @@ AUTHED = [Depends(get_current_user)]
 app.include_router(auth.router)  # public and self-service; guarded per route
 app.include_router(users.router)  # admin-only; guarded per route
 app.include_router(mail.router)  # admin-only; guarded per route
+app.include_router(pterodactyl.router)  # admin-only; guarded per route
 app.include_router(servers.router, dependencies=SCOPED)
 app.include_router(status.router, dependencies=SCOPED)
 app.include_router(stats.router, dependencies=SCOPED)
@@ -67,6 +71,7 @@ app.include_router(settings.router, dependencies=AUTHED)
 app.include_router(identities.router, dependencies=AUTHED)
 app.include_router(satisfactory.router, dependencies=SCOPED)
 app.include_router(palworld.router, dependencies=SCOPED)
+app.include_router(server_pterodactyl.router, dependencies=SCOPED)
 
 
 @app.on_event("startup")
@@ -81,24 +86,29 @@ def on_startup() -> None:
     finally:
         db.close()
     collector.start()
+    pterodactyl_poller.start()
 
 
 @app.on_event("shutdown")
 def on_shutdown() -> None:
     collector.stop()
+    pterodactyl_poller.stop()
     from app.services.palworld_api import palworld_pool
+    from app.services.pterodactyl_api import panel_registry
     from app.services.rcon_pool import rcon_pool
     from app.services.satisfactory_api import satisfactory_pool
 
     rcon_pool.invalidate_all()
     satisfactory_pool.invalidate_all()
     palworld_pool.invalidate_all()
+    panel_registry.invalidate_all()
 
 
 @app.get("/api/health")
 def health() -> dict:
     from app.config import get_settings
     from app.services.palworld_api import palworld_pool
+    from app.services.pterodactyl_api import panel_registry
     from app.services.rcon_pool import rcon_pool
     from app.services.satisfactory_api import satisfactory_pool
 
@@ -109,6 +119,7 @@ def health() -> dict:
         "rcon_sessions": rcon_pool.stats(),
         "api_sessions": satisfactory_pool.stats(),
         "palworld_sessions": palworld_pool.stats(),
+        "pterodactyl_sessions": panel_registry.stats(),
     }
 
 

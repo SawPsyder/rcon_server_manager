@@ -96,6 +96,13 @@ def test_connection_settings_routes_are_admin_only():
         ("DELETE", "/api/servers/{server_id}"),
         ("PUT", "/api/settings"),
         ("GET", "/api/settings/client-ip"),
+        # The panel credentials, and the inventory used to pick a link target.
+        # Operators may press the power buttons; only an admin decides which
+        # container they point at.
+        ("GET", "/api/pterodactyl"),
+        ("PUT", "/api/pterodactyl"),
+        ("POST", "/api/pterodactyl/test"),
+        ("GET", "/api/pterodactyl/servers"),
         # These two rotate servers.rcon_password_enc from inside the game panel.
         ("POST", "/api/servers/{server_id}/satisfactory/passwords/admin"),
         ("POST", "/api/servers/{server_id}/satisfactory/claim"),
