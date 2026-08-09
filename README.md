@@ -25,6 +25,7 @@ A self-hosted **web admin dashboard** for managing game servers from one place.
 - Multi-user auth with invites, 2FA, mail, and server grants
 - TOTP setup QR code and simpler mail test UX
 - Client IP header config with Settings helpers diagnostics
+- Pterodactyl panel integration for container resources and power
 <!-- FEATURES:END -->
 
 Game-specific admin tools (player control, map travel, saves, etc.) depend on the server type - see below.
