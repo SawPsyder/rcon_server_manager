@@ -1,4 +1,4 @@
-"""Container resources and power control for a server linked to Pterodactyl.
+"""Container resources, power, and startup variables for a Pterodactyl-linked server.
 
 Unlike ``app.api.pterodactyl`` (admin-only credentials and inventory), these
 routes are SCOPED: a user granted a server may read its resources and press
@@ -10,15 +10,18 @@ server down at 2am and unable to bring it back.
 ``kill`` is the exception. It is SIGKILL with no save, so it is admin-only on
 top of the grant.
 
-Every power action is written to ``command_history`` - successes and refusals
-alike, since "the operator tried to restart a suspended container" is exactly
-what an audit trail is for. Resource reads are not logged; they are a polling
-loop and would swamp the table.
+Startup variable read/write and the Sandstorm "Set as default map" action are
+also admin-only: they change egg configuration that survives restarts, not
+runtime state an operator already controls via travel.
 
-The read endpoints do no upstream work in the normal case.
+Every power action (and every startup write) is written to ``command_history``
+- successes and refusals alike. Resource reads are not logged; they are a
+polling loop and would swamp the table.
+
+The resource read endpoints do no upstream work in the normal case.
 ``app.services.pterodactyl_poller`` refreshes every linked server on its own
 schedule, so both the live card and the history series below are views onto the
-same readings and cannot disagree.
+same readings and cannot disagree. Startup vars are fetched on demand only.
 """
 
 from __future__ import annotations
@@ -34,17 +37,24 @@ from sqlalchemy.orm import Session
 from app.api.servers import get_server_or_404
 from app.api.stats import MAX_CHART_POINTS, RANGE_DELTAS
 from app.database import get_db
-from app.deps import CurrentUser
-from app.models import CommandHistory, PterodactylSample, Server, User
+from app.deps import AdminUser, CurrentUser
+from app.models import CommandHistory, MapConfig, PterodactylSample, Server, User
 from app.schemas import (
+    PterodactylDefaultMapOut,
+    PterodactylDefaultMapRequest,
     PterodactylHistoryOut,
     PterodactylHistoryPoint,
     PterodactylPowerOut,
     PterodactylPowerRequest,
     PterodactylResourcesOut,
+    PterodactylStartupOut,
+    PterodactylStartupVariableOut,
+    PterodactylStartupVariableUpdate,
 )
+from app.server_types import get_adapter
 from app.services import pterodactyl_api, pterodactyl_settings
 from app.services.pterodactyl_api import (
+    MAP_DEFAULT_ENV_KEYS,
     PterodactylApiError,
     PterodactylAuthError,
     PterodactylConflictError,
@@ -52,6 +62,8 @@ from app.services.pterodactyl_api import (
     PterodactylRateLimitError,
     PterodactylTimeoutError,
     PterodactylTlsError,
+    StartupConfig,
+    StartupVariable,
 )
 from app.services.server_options import option_str
 
@@ -357,4 +369,166 @@ def server_power(
         # Never claims the state changed: the panel returns 204 the moment
         # wings accepts the signal, and does the work afterwards.
         detail=f"{signal.capitalize()} requested.",
+    )
+
+
+def _startup_var_out(var: StartupVariable) -> PterodactylStartupVariableOut:
+    return PterodactylStartupVariableOut(
+        env_variable=var.env_variable,
+        name=var.name,
+        description=var.description,
+        server_value=var.server_value,
+        default_value=var.default_value,
+        is_editable=var.is_editable,
+        rules=var.rules,
+    )
+
+
+def _startup_out(config: StartupConfig) -> PterodactylStartupOut:
+    return PterodactylStartupOut(
+        variables=[_startup_var_out(v) for v in config.variables],
+        startup_command=config.startup_command,
+        has_map_defaults=config.has_map_defaults(),
+    )
+
+
+@router.get("/startup", response_model=PterodactylStartupOut)
+def server_startup(
+    server_id: int,
+    _admin: AdminUser,
+    db: Session = Depends(get_db),
+) -> PterodactylStartupOut:
+    """List egg startup variables for a linked container (admin only)."""
+    _server, uuid, client = _linked(db, server_id)
+    with _api_errors():
+        return _startup_out(client.list_startup(uuid))
+
+
+@router.put("/startup/variable", response_model=PterodactylStartupVariableOut)
+def server_startup_variable(
+    server_id: int,
+    body: PterodactylStartupVariableUpdate,
+    admin: AdminUser,
+    db: Session = Depends(get_db),
+) -> PterodactylStartupVariableOut:
+    """Update one egg startup variable (admin only)."""
+    server, uuid, client = _linked(db, server_id)
+    key = body.key.strip()
+    try:
+        updated = client.update_startup_variable(uuid, key, body.value)
+    except PterodactylApiError as exc:
+        _log(
+            db,
+            server,
+            f"startup {key}",
+            f"refused: {exc}",
+            actor=admin,
+        )
+        raise _http_error(exc) from exc
+
+    _log(
+        db,
+        server,
+        f"startup {key}",
+        f"set to {body.value!r}",
+        actor=admin,
+    )
+    return _startup_var_out(updated)
+
+
+@router.post("/default-map", response_model=PterodactylDefaultMapOut)
+def server_default_map(
+    server_id: int,
+    body: PterodactylDefaultMapRequest,
+    admin: AdminUser,
+    db: Session = Depends(get_db),
+) -> PterodactylDefaultMapOut:
+    """Set panel MAP_NAME + SCENARIO from the selected Sandstorm map/gamemode.
+
+    Does not restart the container - values apply on the next start. Requires
+    the linked egg to expose both env keys.
+    """
+    server, uuid, client = _linked(db, server_id)
+    server_type = (server.server_type or "").strip() or "sandstorm"
+    if server_type != "sandstorm":
+        raise HTTPException(
+            status_code=400,
+            detail="Default map is only supported for Insurgency: Sandstorm servers.",
+        )
+
+    map_row = db.get(MapConfig, body.map_id)
+    if not map_row:
+        raise HTTPException(status_code=404, detail="Map not found")
+    map_type = getattr(map_row, "server_type", None) or "sandstorm"
+    if map_type != "sandstorm":
+        raise HTTPException(status_code=400, detail="Map is not valid for this server type")
+
+    try:
+        adapter = get_adapter("sandstorm")
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail="Sandstorm adapter unavailable") from exc
+
+    gamemodes = adapter.map_gamemodes(map_row)
+    if body.gamemode_key not in gamemodes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Gamemode '{body.gamemode_key}' not available for this map",
+        )
+    scenario = gamemodes[body.gamemode_key]
+    map_name = str(map_row.map_name or "").strip()
+    if not map_name:
+        raise HTTPException(status_code=400, detail="Map has no map_name")
+
+    with _api_errors():
+        startup = client.list_startup(uuid, use_cache=False)
+
+    missing = [k for k in MAP_DEFAULT_ENV_KEYS if k not in startup.env_keys()]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This container's egg does not expose SCENARIO and MAP_NAME. "
+                f"Missing: {', '.join(missing)}."
+            ),
+        )
+
+    # Apply both. If the second fails after the first succeeded, surface which
+    # key failed rather than claiming a full success.
+    applied: dict[str, str] = {}
+    try:
+        for key, value in (("MAP_NAME", map_name), ("SCENARIO", scenario)):
+            client.update_startup_variable(uuid, key, value)
+            applied[key] = value
+    except PterodactylApiError as exc:
+        partial = (
+            f" (already set: {', '.join(f'{k}={v!r}' for k, v in applied.items())})"
+            if applied
+            else ""
+        )
+        _log(
+            db,
+            server,
+            f"startup default-map MAP_NAME={map_name} SCENARIO={scenario}",
+            f"refused: {exc}{partial}",
+            actor=admin,
+        )
+        raise _http_error(exc) from exc
+
+    detail = (
+        f"Default map set to {map_row.alias} ({map_name}), "
+        f"scenario {scenario}. Takes effect on next start/restart."
+    )
+    _log(
+        db,
+        server,
+        f"startup default-map MAP_NAME={map_name} SCENARIO={scenario}",
+        detail,
+        actor=admin,
+    )
+    return PterodactylDefaultMapOut(
+        map_alias=map_row.alias,
+        map_name=map_name,
+        scenario=scenario,
+        gamemode_key=body.gamemode_key,
+        detail=detail,
     )

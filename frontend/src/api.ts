@@ -648,6 +648,31 @@ export type PterodactylPowerResult = {
   detail: string;
 };
 
+export type PterodactylStartupVariable = {
+  env_variable: string;
+  name: string;
+  description: string;
+  server_value: string;
+  default_value: string;
+  is_editable: boolean;
+  rules: string;
+};
+
+export type PterodactylStartup = {
+  variables: PterodactylStartupVariable[];
+  startup_command: string;
+  /** True when the egg exposes both MAP_NAME and SCENARIO. */
+  has_map_defaults: boolean;
+};
+
+export type PterodactylDefaultMapResult = {
+  map_alias: string;
+  map_name: string;
+  scenario: string;
+  gamemode_key: string;
+  detail: string;
+};
+
 export type MailSettingsUpdate = {
   host: string;
   port: number;
@@ -864,6 +889,27 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ signal, confirm }),
       }),
+    startup: (id: number) =>
+      request<PterodactylStartup>(`/api/servers/${id}/pterodactyl/startup`),
+    updateStartupVariable: (id: number, key: string, value: string) =>
+      request<PterodactylStartupVariable>(
+        `/api/servers/${id}/pterodactyl/startup/variable`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ key, value }),
+        },
+      ),
+    setDefaultMap: (
+      id: number,
+      body: { map_id: number; gamemode_key: string },
+    ) =>
+      request<PterodactylDefaultMapResult>(
+        `/api/servers/${id}/pterodactyl/default-map`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        },
+      ),
   },
 
   serverTypes: () => request<ServerTypeInfo[]>("/api/servers/types"),

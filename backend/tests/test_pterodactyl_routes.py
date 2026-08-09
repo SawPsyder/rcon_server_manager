@@ -15,8 +15,13 @@ from sqlalchemy.orm import sessionmaker
 from app.api import server_pterodactyl as routes
 from app.api import servers as server_routes
 from app.api.servers import _to_out
-from app.models import ROLE_ADMIN, ROLE_USER, Base, CommandHistory, Server, User
-from app.schemas import ServerOptionsIn, ServerUpdate
+from app.models import ROLE_ADMIN, ROLE_USER, Base, CommandHistory, MapConfig, Server, User
+from app.schemas import (
+    PterodactylDefaultMapRequest,
+    PterodactylStartupVariableUpdate,
+    ServerOptionsIn,
+    ServerUpdate,
+)
 from app.services import pterodactyl_api, pterodactyl_settings
 from app.services.pterodactyl_api import PanelClient, PterodactylConflictError
 from app.services.server_options import save_options
@@ -317,7 +322,237 @@ def test_timeout_is_a_504():
 
 
 def test_anything_else_is_a_502():
-    assert routes._http_error(pterodactyl_api.PterodactylApiError("?")).status_code == 502
+    exc = routes._http_error(pterodactyl_api.PterodactylApiError("boom"))
+    assert exc.status_code == 502
+
+
+# --- startup / default-map -------------------------------------------------
+
+
+def _startup_list_payload(*, include_map_keys: bool = True):
+    data = []
+    if include_map_keys:
+        data.extend(
+            [
+                {
+                    "object": "egg_variable",
+                    "attributes": {
+                        "name": "Default Map",
+                        "env_variable": "MAP_NAME",
+                        "server_value": "Ministry",
+                        "default_value": "Ministry",
+                        "is_editable": True,
+                        "rules": "required|string",
+                        "description": "",
+                    },
+                },
+                {
+                    "object": "egg_variable",
+                    "attributes": {
+                        "name": "Scenario Name",
+                        "env_variable": "SCENARIO",
+                        "server_value": "Scenario_Ministry_Checkpoint_Security",
+                        "default_value": "Scenario_Ministry_Checkpoint_Security",
+                        "is_editable": True,
+                        "rules": "required|string",
+                        "description": "",
+                    },
+                },
+            ]
+        )
+    data.append(
+        {
+            "object": "egg_variable",
+            "attributes": {
+                "name": "Server Name",
+                "env_variable": "SERVER_NAME",
+                "server_value": "Box",
+                "default_value": "Box",
+                "is_editable": True,
+                "rules": "",
+                "description": "",
+            },
+        }
+    )
+    return {"object": "list", "data": data, "meta": {"startup_command": "./x"}}
+
+
+def _startup_handler(*, include_map_keys: bool = True):
+    seen: list[httpx.Request] = []
+    state: dict[str, str] = {
+        "MAP_NAME": "Ministry",
+        "SCENARIO": "Scenario_Ministry_Checkpoint_Security",
+        "SERVER_NAME": "Box",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        path = request.url.path
+        if request.method == "GET" and path.endswith("/startup"):
+            payload = _startup_list_payload(include_map_keys=include_map_keys)
+            # Reflect latest values for map keys when present.
+            for item in payload["data"]:
+                env = item["attributes"]["env_variable"]
+                if env in state:
+                    item["attributes"]["server_value"] = state[env]
+            return httpx.Response(200, json=payload)
+        if request.method == "PUT" and path.endswith("/startup/variable"):
+            import json
+
+            body = json.loads(request.content.decode() or "{}")
+            key = body["key"]
+            if include_map_keys is False and key in ("MAP_NAME", "SCENARIO"):
+                return httpx.Response(
+                    400,
+                    json={
+                        "errors": [
+                            {
+                                "code": "x",
+                                "status": "400",
+                                "detail": "variable does not exist",
+                            }
+                        ]
+                    },
+                )
+            state[key] = body["value"]
+            return httpx.Response(
+                200,
+                json={
+                    "object": "egg_variable",
+                    "attributes": {
+                        "name": key,
+                        "env_variable": key,
+                        "server_value": body["value"],
+                        "default_value": "",
+                        "is_editable": True,
+                        "rules": "",
+                        "description": "",
+                    },
+                },
+            )
+        return httpx.Response(404, json={})
+
+    return handler, seen, state
+
+
+def _seed_hold_map(db) -> MapConfig:
+    row = MapConfig(
+        server_type="sandstorm",
+        alias="Hold",
+        map_name="Hold",
+        day=True,
+        night=True,
+        checkpoint="Scenario_Hold_Checkpoint_Security",
+        checkpoint_ins="Scenario_Hold_Checkpoint_Insurgents",
+        self_added=True,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def test_startup_list_is_admin_only_at_the_handler(db, monkeypatch):
+    """Route depends on AdminUser; non-admins never reach the panel."""
+    configure_panel(db)
+    server = make_server(db)
+    handler, seen, _ = _startup_handler()
+    install_client(monkeypatch, handler)
+
+    out = routes.server_startup(server.id, make_user(ROLE_ADMIN), db=db)
+    assert out.has_map_defaults is True
+    assert {v.env_variable for v in out.variables} >= {"MAP_NAME", "SCENARIO"}
+    assert len(seen) == 1
+
+
+def test_startup_variable_update_writes_and_logs(db, monkeypatch):
+    configure_panel(db)
+    server = make_server(db)
+    handler, seen, state = _startup_handler()
+    install_client(monkeypatch, handler)
+
+    admin = make_user(ROLE_ADMIN)
+    db.add(admin)
+    db.commit()
+
+    body = PterodactylStartupVariableUpdate(key="MAP_NAME", value="Hold")
+    out = routes.server_startup_variable(server.id, body, admin, db=db)
+    assert out.server_value == "Hold"
+    assert state["MAP_NAME"] == "Hold"
+    assert any(r.method == "PUT" for r in seen)
+
+    rows = db.query(CommandHistory).all()
+    assert len(rows) == 1
+    assert "startup MAP_NAME" in rows[0].command
+
+
+def test_default_map_sets_both_env_keys(db, monkeypatch):
+    configure_panel(db)
+    server = make_server(db)
+    hold = _seed_hold_map(db)
+    handler, seen, state = _startup_handler()
+    install_client(monkeypatch, handler)
+
+    admin = make_user(ROLE_ADMIN)
+    db.add(admin)
+    db.commit()
+
+    body = PterodactylDefaultMapRequest(map_id=hold.id, gamemode_key="checkpoint")
+    out = routes.server_default_map(server.id, body, admin, db=db)
+    assert out.map_name == "Hold"
+    assert out.scenario == "Scenario_Hold_Checkpoint_Security"
+    assert state["MAP_NAME"] == "Hold"
+    assert state["SCENARIO"] == "Scenario_Hold_Checkpoint_Security"
+    puts = [r for r in seen if r.method == "PUT"]
+    assert len(puts) == 2
+    assert "next start" in out.detail.lower() or "restart" in out.detail.lower()
+
+    rows = db.query(CommandHistory).all()
+    assert len(rows) == 1
+    assert "default-map" in rows[0].command
+
+
+def test_default_map_requires_both_keys(db, monkeypatch):
+    configure_panel(db)
+    server = make_server(db)
+    hold = _seed_hold_map(db)
+    handler, seen, _ = _startup_handler(include_map_keys=False)
+    install_client(monkeypatch, handler)
+
+    body = PterodactylDefaultMapRequest(map_id=hold.id, gamemode_key="checkpoint")
+    with pytest.raises(HTTPException) as exc:
+        routes.server_default_map(server.id, body, make_user(ROLE_ADMIN), db=db)
+    assert exc.value.status_code == 400
+    assert "MAP_NAME" in exc.value.detail or "SCENARIO" in exc.value.detail
+    assert not any(r.method == "PUT" for r in seen)
+
+
+def test_default_map_rejects_non_sandstorm(db, monkeypatch):
+    configure_panel(db)
+    server = make_server(db)
+    server.server_type = "palworld"
+    db.commit()
+    hold = _seed_hold_map(db)
+    handler, seen, _ = _startup_handler()
+    install_client(monkeypatch, handler)
+
+    body = PterodactylDefaultMapRequest(map_id=hold.id, gamemode_key="checkpoint")
+    with pytest.raises(HTTPException) as exc:
+        routes.server_default_map(server.id, body, make_user(ROLE_ADMIN), db=db)
+    assert exc.value.status_code == 400
+    assert "sandstorm" in exc.value.detail.lower()
+    assert seen == []
+
+
+def test_default_map_unlinked_is_400(db):
+    configure_panel(db)
+    server = make_server(db, linked=False)
+    hold = _seed_hold_map(db)
+    body = PterodactylDefaultMapRequest(map_id=hold.id, gamemode_key="checkpoint")
+    with pytest.raises(HTTPException) as exc:
+        routes.server_default_map(server.id, body, make_user(ROLE_ADMIN), db=db)
+    assert exc.value.status_code == 400
+    assert "not linked" in exc.value.detail
 
 
 # --- resources -------------------------------------------------------------
