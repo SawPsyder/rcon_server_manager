@@ -22,6 +22,7 @@ A self-hosted **web admin dashboard** for managing game servers from one place.
 - Encrypted server credentials at rest
 - Optional Steam persona name lookup
 - Palworld interactive world map with share links and permanent-only bans
+- Multi-user auth with invites, 2FA, mail, and server grants
 <!-- FEATURES:END -->
 
 Game-specific admin tools (player control, map travel, saves, etc.) depend on the server type - see below.
@@ -125,6 +126,11 @@ services:
       DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY}
+      # Email is configured in the app under Settings -> Email, not here
+      # Optional Cloudflare Turnstile - both must be set or it stays off
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
     volumes:
       - /change/me/rcon_manager:/data
 
@@ -138,7 +144,7 @@ networks:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ADMIN_PASSWORD` | Yes (first boot) | Initial dashboard password (hashed and stored; changing the env later does not reset it by itself) |
+| `ADMIN_PASSWORD` | Yes (first boot) | Bootstrap password. Used **once**, to claim the first administrator account from the login screen. Inert afterwards — see [Users and access](#users-and-access) |
 | `SECRET_KEY` | Yes | Secret used to sign session cookies |
 | `POSTGRES_HOST` | Yes (Compose) | Database hostname (`db` in the sample) |
 | `POSTGRES_PORT` | No | Default `5432` |
@@ -149,3 +155,91 @@ networks:
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | No | SQLAlchemy pool size (defaults `5` / `10`) |
 | `STEAM_WEB_API_KEY` | No | Steam Web API key for persona name lookup |
 | `DATABASE_URL` | No | Full SQLAlchemy URL; if unset, built from `POSTGRES_*` when `POSTGRES_HOST` is set |
+| `RESET_TOKEN_TTL_MINUTES` / `INVITE_TOKEN_TTL_HOURS` | No | Link lifetimes (defaults `60` / `72`) |
+| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | No | Cloudflare Turnstile. **Both** must be set or Turnstile is not used. Gates sign-in, password-reset requests and the admin claim |
+| `TRUSTED_PROXY_IPS` | No | Comma-separated reverse-proxy addresses whose `X-Forwarded-For` may be trusted for client-IP detection. Empty (default) means trust none and use the socket peer |
+
+---
+
+## Users and access
+
+Each person gets their own account. There is no shared password.
+
+**First run.** With no administrator yet, the login screen offers *"First run? Create an
+administrator"*. Enter an email, a new password, and the `ADMIN_PASSWORD` from your
+environment. That creates the first admin and signs you in.
+
+**`ADMIN_PASSWORD` is inert from that moment on.** The claim endpoint returns 404 once an
+active administrator exists, and no operation is allowed to reduce the number of active
+administrators to zero, so the claim window cannot be reopened from inside the app.
+
+**Password recovery.** Every user — including administrators — recovers through the normal
+password-reset flow (self-service “Forgot password” when mail is configured, or an
+admin-issued reset link from **Users**). After setting a new password you always sign in
+through the normal login path, including two-factor authentication when it is enabled.
+
+**Temporary lockout.** After several failed sign-in attempts (wrong password or 2FA code)
+an account is locked for a short period. The sign-in form explains the lock; administrators
+see a **Temp locked** status on **Users** and can unlock the account immediately.
+
+**Roles.**
+
+- **Administrator** — everything, including connection settings and user management.
+- **User** — only the servers an administrator grants them. On those servers they can do
+  everything an admin can: RCON, kick/ban/unban, map travel, the Palworld and Satisfactory
+  panels. They **cannot** see or edit connection settings (host, ports, RCON password, TLS
+  options), and servers they were not granted are invisible — not merely hidden in the UI,
+  but 404 from the API.
+
+**Invitations.** Administrators invite users from **Users**. With email configured the
+invitation is emailed; without it, the one-time link is shown in the UI to pass on yourself.
+The same applies to password resets.
+
+**Email is configured in the app, not in the environment** — go to **Settings → Email** and set
+the SMTP host, credentials, sender, and the application URL that links are built from. It is
+stored in the database (the password encrypted with the same key that protects RCON
+passwords), so moving relays or rotating a password does not need a redeploy. There is a
+**Send test email** button that reports the actual SMTP error rather than hiding it in the log.
+
+Leave the SMTP host empty to turn email off entirely; invite and reset links are then shown
+in the UI for you to deliver yourself. The old `SMTP_*` and `PUBLIC_BASE_URL` variables are
+still read as a fallback for installs that predate this screen, and are ignored permanently
+once the form has been saved once.
+
+**Two-factor authentication** is optional and per user, set up under **Account** with any
+TOTP authenticator app. Enrolment shows ten one-time recovery codes — they are displayed
+once and stored only as hashes. An administrator can clear another user's 2FA if they lose
+their device.
+
+**Moderation actions are now attributed.** Kicks, bans and console commands record which
+account performed them.
+
+> **Upgrading from a single-password install:** existing session cookies are rejected on
+> first start, so everyone is signed out once and the login screen shows the first-run claim.
+> No data migration is needed — the schema changes are additive and admins bypass grants, so
+> a single-admin install behaves exactly as before.
+
+### Cloudflare Turnstile
+
+Set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` to put a Cloudflare challenge in front of
+sign-in, password-reset requests and the first-run admin claim. Leave either unset and the
+feature is off entirely.
+
+Register your deployment's hostname on the widget in the Cloudflare dashboard. For local
+development use Cloudflare's always-passes test pair (site key `1x00000000000000000000AA`,
+secret `1x0000000000000000000000000000000AA`), or simply leave both variables unset.
+
+Verification always happens server-side; the browser never talks to `siteverify`. If your
+deployment sits behind a reverse proxy, set `TRUSTED_PROXY_IPS` so the client IP passed to
+Cloudflare is the real visitor rather than the proxy.
+
+To confirm the secret reached the backend, redeem a deliberately invalid token:
+
+```sh
+curl -sS -X POST https://challenges.cloudflare.com/turnstile/v0/siteverify \
+  --data-urlencode "secret=$TURNSTILE_SECRET" \
+  --data-urlencode "response=XXXX.DUMMY.TOKEN.XXXX"
+```
+
+`{"success":false,"error-codes":["invalid-input-response"]}` means the secret is correct.
+`invalid-input-secret` means it is not.

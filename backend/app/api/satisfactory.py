@@ -20,8 +20,8 @@ from sqlalchemy.orm import Session
 
 from app.api.servers import get_rcon_password, get_server_or_404
 from app.database import get_db
-from app.deps import require_admin
-from app.models import CommandHistory, Server
+from app.deps import AdminUser, CurrentUser
+from app.models import CommandHistory, Server, User
 from app.schemas import (
     AutoLoadRequest,
     ClaimServerRequest,
@@ -101,7 +101,13 @@ def _client(
         return server, client_for_server(server, secret, timeout=API_TIMEOUT)
 
 
-def _log(db: Session, server: Server, command: str, response: str = "") -> None:
+def _log(
+    db: Session,
+    server: Server,
+    command: str,
+    response: str = "",
+    actor: User | None = None,
+) -> None:
     """Record an admin action in the shared command history."""
     try:
         db.add(
@@ -109,6 +115,7 @@ def _log(db: Session, server: Server, command: str, response: str = "") -> None:
                 server_id=server.id,
                 command=f"satisfactory:{command}"[:2000],
                 response=(response or "ok")[:4000],
+                actor_user_id=actor.id if actor else None,
             )
         )
         db.commit()
@@ -131,8 +138,8 @@ def _require_confirm(confirm: bool, what: str) -> None:
 @router.get("/health", response_model=SatisfactoryHealthOut)
 def health(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryHealthOut:
     """Reachability probe - works even without credentials."""
     _server, client = _client(db, server_id, require_secret=False)
@@ -147,8 +154,8 @@ def health(
 @router.get("/state", response_model=SatisfactoryStateOut)
 def state(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryStateOut:
     _server, client = _client(db, server_id)
     with _api_errors():
@@ -159,8 +166,8 @@ def state(
 @router.get("/options", response_model=SatisfactoryOptionsOut)
 def get_options(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryOptionsOut:
     _server, client = _client(db, server_id)
     with _api_errors():
@@ -176,8 +183,8 @@ def get_options(
 @router.get("/advanced-settings", response_model=SatisfactoryAdvancedOut)
 def get_advanced_settings(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryAdvancedOut:
     _server, client = _client(db, server_id)
     with _api_errors():
@@ -191,8 +198,8 @@ def get_advanced_settings(
 @router.get("/sessions", response_model=SatisfactorySessionsOut)
 def sessions(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactorySessionsOut:
     _server, client = _client(db, server_id)
     with _api_errors():
@@ -209,15 +216,15 @@ def sessions(
 @router.put("/options", response_model=SatisfactoryActionOut)
 def apply_options(
     server_id: int,
+    user: CurrentUser,
     body: SatisfactoryOptionsUpdate,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     server, client = _client(db, server_id)
     with _api_errors():
         client.apply_server_options(body.options)
     keys = ", ".join(sorted(body.options))
-    _log(db, server, f"ApplyServerOptions {keys}")
+    _log(db, server, f"ApplyServerOptions {keys}", actor=user)
     return SatisfactoryActionOut(
         detail=(
             "Server options applied. Options that cannot change at runtime stay "
@@ -229,9 +236,9 @@ def apply_options(
 @router.put("/advanced-settings", response_model=SatisfactoryActionOut)
 def apply_advanced_settings(
     server_id: int,
+    user: CurrentUser,
     body: SatisfactoryAdvancedUpdate,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     _require_confirm(
         body.confirm,
@@ -241,7 +248,7 @@ def apply_advanced_settings(
     with _api_errors():
         client.apply_advanced_game_settings(body.settings)
     keys = ", ".join(sorted(body.settings))
-    _log(db, server, f"ApplyAdvancedGameSettings {keys}")
+    _log(db, server, f"ApplyAdvancedGameSettings {keys}", actor=user)
     return SatisfactoryActionOut(
         detail="Advanced game settings applied. This save is now flagged as edited."
     )
@@ -250,28 +257,28 @@ def apply_advanced_settings(
 @router.post("/rename", response_model=SatisfactoryActionOut)
 def rename(
     server_id: int,
+    user: CurrentUser,
     body: RenameServerRequest,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     server, client = _client(db, server_id)
     with _api_errors():
         client.rename_server(body.server_name)
-    _log(db, server, f"RenameServer {body.server_name}")
+    _log(db, server, f"RenameServer {body.server_name}", actor=user)
     return SatisfactoryActionOut(detail=f"Server renamed to {body.server_name}")
 
 
 @router.post("/auto-load", response_model=SatisfactoryActionOut)
 def set_auto_load(
     server_id: int,
+    user: CurrentUser,
     body: AutoLoadRequest,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     server, client = _client(db, server_id)
     with _api_errors():
         client.set_auto_load_session_name(body.session_name)
-    _log(db, server, f"SetAutoLoadSessionName {body.session_name}")
+    _log(db, server, f"SetAutoLoadSessionName {body.session_name}", actor=user)
     return SatisfactoryActionOut(
         detail=f"Auto-load session set to {body.session_name or '(none)'}"
     )
@@ -280,25 +287,28 @@ def set_auto_load(
 @router.post("/passwords/client", response_model=SatisfactoryActionOut)
 def set_client_password(
     server_id: int,
+    user: CurrentUser,
     body: SetPasswordRequest,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     server, client = _client(db, server_id)
     with _api_errors():
         client.set_client_password(body.password)
-    _log(db, server, "SetClientPassword")
+    _log(db, server, "SetClientPassword", actor=user)
     return SatisfactoryActionOut(
         detail="Client password cleared" if not body.password else "Client password updated"
     )
 
 
+# Admin-only: this rotates servers.rcon_password_enc, i.e. it edits connection
+# settings from inside a game-admin router. A granted operator running it could
+# otherwise change the stored credential and lock the owner out.
 @router.post("/passwords/admin", response_model=SatisfactoryActionOut)
 def set_admin_password(
     server_id: int,
     body: SetPasswordRequest,
+    user: AdminUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     """Change the game server's admin password.
 
@@ -319,7 +329,7 @@ def set_admin_password(
         db.commit()
         rotated = True
     satisfactory_pool.invalidate_endpoint(server.host, server.query_port)
-    _log(db, server, "SetAdminPassword")
+    _log(db, server, "SetAdminPassword", actor=user)
     return SatisfactoryActionOut(
         detail=(
             "Admin password updated and the stored secret was rotated to match."
@@ -329,12 +339,14 @@ def set_admin_password(
     )
 
 
+# Admin-only for the same reason as set_admin_password: it writes the stored
+# connection secret.
 @router.post("/claim", response_model=SatisfactoryActionOut)
 def claim(
     server_id: int,
     body: ClaimServerRequest,
+    user: AdminUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     """Claim a fresh, unclaimed server and store the admin token it returns."""
     server, client = _client(db, server_id, require_secret=False)
@@ -344,7 +356,7 @@ def claim(
     server.rcon_password_enc = encrypt_secret(token or body.admin_password)
     db.commit()
     satisfactory_pool.invalidate_endpoint(server.host, server.query_port)
-    _log(db, server, f"ClaimServer {body.server_name}")
+    _log(db, server, f"ClaimServer {body.server_name}", actor=user)
     return SatisfactoryActionOut(
         detail=(
             f"Claimed {body.server_name}. "
@@ -359,23 +371,23 @@ def claim(
 @router.post("/save", response_model=SatisfactoryActionOut)
 def save_game(
     server_id: int,
+    user: CurrentUser,
     body: SaveGameRequest,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     server, client = _client(db, server_id)
     with _api_errors():
         client.save_game(body.save_name)
-    _log(db, server, f"SaveGame {body.save_name}")
+    _log(db, server, f"SaveGame {body.save_name}", actor=user)
     return SatisfactoryActionOut(detail=f"Saved as {body.save_name}")
 
 
 @router.post("/load", response_model=SatisfactoryActionOut)
 def load_game(
     server_id: int,
+    user: CurrentUser,
     body: LoadGameRequest,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     server, client = _client(db, server_id)
     with _api_errors():
@@ -383,7 +395,7 @@ def load_game(
             body.save_name,
             enable_advanced_game_settings=body.enable_advanced_game_settings,
         )
-    _log(db, server, f"LoadGame {body.save_name}")
+    _log(db, server, f"LoadGame {body.save_name}", actor=user)
     return SatisfactoryActionOut(
         detail=f"Loading {body.save_name} - the server drops all players while it reloads."
     )
@@ -392,26 +404,26 @@ def load_game(
 @router.delete("/saves/{save_name}", response_model=SatisfactoryActionOut)
 def delete_save(
     server_id: int,
+    user: CurrentUser,
     save_name: str,
     confirm: bool = False,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     _require_confirm(confirm, "Deleting a save file is irreversible, so it")
     server, client = _client(db, server_id)
     with _api_errors():
         client.delete_save_file(save_name)
-    _log(db, server, f"DeleteSaveFile {save_name}")
+    _log(db, server, f"DeleteSaveFile {save_name}", actor=user)
     return SatisfactoryActionOut(detail=f"Deleted save {save_name}")
 
 
 @router.delete("/sessions/{session_name}", response_model=SatisfactoryActionOut)
 def delete_session(
     server_id: int,
+    user: CurrentUser,
     session_name: str,
     confirm: bool = False,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     _require_confirm(
         confirm, "Deleting a session removes every save it contains, so it"
@@ -419,7 +431,7 @@ def delete_session(
     server, client = _client(db, server_id)
     with _api_errors():
         client.delete_save_session(session_name)
-    _log(db, server, f"DeleteSaveSession {session_name}")
+    _log(db, server, f"DeleteSaveSession {session_name}", actor=user)
     return SatisfactoryActionOut(detail=f"Deleted session {session_name}")
 
 
@@ -429,9 +441,9 @@ def delete_session(
 @router.post("/new-game", response_model=SatisfactoryActionOut)
 def new_game(
     server_id: int,
+    user: CurrentUser,
     body: NewGameRequest,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     _require_confirm(
         body.confirm, "Creating a new game abandons the running session, so it"
@@ -444,16 +456,16 @@ def new_game(
             starting_location=body.starting_location,
             skip_onboarding=body.skip_onboarding,
         )
-    _log(db, server, f"CreateNewGame {body.session_name}")
+    _log(db, server, f"CreateNewGame {body.session_name}", actor=user)
     return SatisfactoryActionOut(detail=f"Started new game {body.session_name}")
 
 
 @router.post("/shutdown", response_model=SatisfactoryActionOut)
 def shutdown(
     server_id: int,
+    user: CurrentUser,
     body: ConfirmRequest,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SatisfactoryActionOut:
     _require_confirm(
         body.confirm,
@@ -464,7 +476,7 @@ def shutdown(
     with _api_errors():
         client.shutdown()
     satisfactory_pool.invalidate_endpoint(server.host, server.query_port)
-    _log(db, server, "Shutdown")
+    _log(db, server, "Shutdown", actor=user)
     return SatisfactoryActionOut(
         detail="Shutdown requested. Restart it from your host or process manager."
     )

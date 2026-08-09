@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 from app.api.servers import get_rcon_password, get_server_or_404
 from app.config import get_settings
 from app.database import get_db
-from app.deps import require_admin
 from app.models import Setting
 from app.schemas import PlayerInfo, ServerFeaturesOut, ServerStatus
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter
@@ -30,7 +29,6 @@ def _setting_float(db: Session, key: str, default: float) -> float:
 def server_status(
     server_id: int,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> ServerStatus:
     server = get_server_or_404(db, server_id)
     settings = get_settings()

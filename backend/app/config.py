@@ -47,8 +47,61 @@ class Settings(BaseSettings):
     # How long a cached Steam persona is considered fresh for force-refresh (seconds)
     identity_cache_ttl_seconds: int = 60 * 60 * 24 * 7  # 7 days
 
+    # ---- Multi-user module ----
+    # Absolute base URL of this deployment, e.g. https://ssm.example.org.
+    # Invite / password-reset links are built from THIS, never from the request's
+    # Host header - a spoofed Host would otherwise redirect the reset link
+    # (and the token in it) to an attacker-controlled domain.
+    public_base_url: str = ""
+    reset_token_ttl_minutes: int = 60
+    invite_token_ttl_hours: int = 72
+
+    # ---- Outgoing mail (optional) ----
+    # With smtp_host empty the app degrades gracefully: invite/reset links are
+    # returned to the admin in the API response instead of being emailed.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = True
+    smtp_ssl: bool = False  # implicit TLS (port 465); mutually exclusive with starttls
+    smtp_from: str = ""
+    smtp_from_name: str = "Sandstorm Server Manager"
+    smtp_timeout: float = 10.0
+
+    # ---- Cloudflare Turnstile (optional) ----
+    # Both must be set or the feature stays off. The secret is read from the
+    # TURNSTILE_SECRET environment variable and never appears in source.
+    turnstile_site_key: str = ""
+    turnstile_secret: str = ""
+    turnstile_timeout: float = 8.0
+
+    # Comma-separated proxy addresses whose X-Forwarded-For we trust. Empty means
+    # trust nothing and always use the socket peer - see deps.client_ip.
+    trusted_proxy_ips: str = ""
+
     def resolved_steam_api_key(self) -> str:
         return (self.steam_web_api_key or self.steam_api_key or "").strip()
+
+    @property
+    def turnstile_enabled(self) -> bool:
+        return bool(self.turnstile_site_key.strip() and self.turnstile_secret.strip())
+
+    @property
+    def smtp_enabled(self) -> bool:
+        return bool(self.smtp_host.strip())
+
+    @property
+    def resolved_smtp_from(self) -> str:
+        """Envelope/From address. Falls back to the auth user when unset."""
+        return (self.smtp_from or self.smtp_user or "").strip()
+
+    @property
+    def trusted_proxies(self) -> set[str]:
+        return {p.strip() for p in self.trusted_proxy_ips.split(",") if p.strip()}
+
+    def base_url(self) -> str:
+        return self.public_base_url.strip().rstrip("/")
 
     @property
     def resolved_database_url(self) -> str:

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -9,6 +9,7 @@ from app.api import (
     auth,
     chart_share,
     identities,
+    mail,
     map_share,
     maps,
     palworld,
@@ -18,9 +19,11 @@ from app.api import (
     settings,
     stats,
     status,
+    users,
 )
 from app.bootstrap import ensure_admin, seed_if_empty
 from app.database import Base, SessionLocal, engine, wait_for_database
+from app.deps import get_current_user, require_server_scope
 from app.migrate import run_migrations
 from app.services.stats_collector import collector
 
@@ -34,20 +37,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
-app.include_router(servers.router)
-app.include_router(status.router)
-app.include_router(stats.router)
-app.include_router(chart_share.admin_router)
-app.include_router(chart_share.public_router)
-app.include_router(map_share.admin_router)
-app.include_router(map_share.public_router)
-app.include_router(rcon.router)
-app.include_router(maps.router)
-app.include_router(settings.router)
-app.include_router(identities.router)
-app.include_router(satisfactory.router)
-app.include_router(palworld.router)
+# Authorization policy, in one place.
+#
+# SCOPED authenticates the caller and, on any route that declares a {server_id}
+# path parameter, requires a grant for that server. Routes in the same router
+# without one are authenticated only.
+# AUTHED authenticates and nothing more.
+#
+# Routers are guarded here rather than route-by-route so the policy is readable
+# at a glance and new routes are covered by default. Individual admin-only
+# routes add Depends(require_admin) on top. tests/test_authz_coverage.py
+# asserts that nothing slips through.
+SCOPED = [Depends(require_server_scope)]
+AUTHED = [Depends(get_current_user)]
+
+app.include_router(auth.router)  # public and self-service; guarded per route
+app.include_router(users.router)  # admin-only; guarded per route
+app.include_router(mail.router)  # admin-only; guarded per route
+app.include_router(servers.router, dependencies=SCOPED)
+app.include_router(status.router, dependencies=SCOPED)
+app.include_router(stats.router, dependencies=SCOPED)
+app.include_router(chart_share.admin_router, dependencies=SCOPED)
+app.include_router(chart_share.public_router)  # public share links
+app.include_router(map_share.admin_router, dependencies=SCOPED)
+app.include_router(map_share.public_router)  # public share links
+app.include_router(rcon.router, dependencies=SCOPED)
+app.include_router(maps.router, dependencies=AUTHED)
+app.include_router(settings.router, dependencies=AUTHED)
+app.include_router(identities.router, dependencies=AUTHED)
+app.include_router(satisfactory.router, dependencies=SCOPED)
+app.include_router(palworld.router, dependencies=SCOPED)
 
 
 @app.on_event("startup")

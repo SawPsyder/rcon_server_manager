@@ -83,6 +83,73 @@ def _add_column(engine: Engine, table: str, column_def: str) -> None:
     logger.info("Added column %s.%s (%s)", table, col_name, _dialect(engine))
 
 
+def _ensure_player_note_author_unique(engine: Engine) -> None:
+    """One note per author per identity (multi-author notebook model).
+
+    Collapses any accidental duplicates (keep the newest by updated_at/id)
+    before creating the unique index. Multiple NULL-author legacy rows are left
+    alone — UNIQUE treats NULLs as distinct on both SQLite and Postgres.
+    """
+    if not _table_exists(engine, "player_admin_notes"):
+        return
+
+    index_name = "uq_player_note_author"
+    insp = inspect(engine)
+    existing = {idx["name"] for idx in insp.get_indexes("player_admin_notes")}
+    # SQLAlchemy may also surface unique constraints via get_unique_constraints.
+    for uc in insp.get_unique_constraints("player_admin_notes"):
+        if uc.get("name"):
+            existing.add(uc["name"])
+    if index_name in existing:
+        return
+
+    with engine.begin() as conn:
+        # Keep the newest row for each (platform, external_id, author_user_id)
+        # where author is known; drop the rest.
+        dups = conn.execute(
+            text(
+                """
+                SELECT platform, external_id, author_user_id, COUNT(*) AS c
+                FROM player_admin_notes
+                WHERE author_user_id IS NOT NULL
+                GROUP BY platform, external_id, author_user_id
+                HAVING COUNT(*) > 1
+                """
+            )
+        ).fetchall()
+        removed = 0
+        for platform, external_id, author_user_id, _count in dups:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id FROM player_admin_notes
+                    WHERE platform = :p AND external_id = :e AND author_user_id = :a
+                    ORDER BY updated_at DESC, id DESC
+                    """
+                ),
+                {"p": platform, "e": external_id, "a": author_user_id},
+            ).fetchall()
+            for (row_id,) in rows[1:]:
+                conn.execute(
+                    text("DELETE FROM player_admin_notes WHERE id = :i"),
+                    {"i": row_id},
+                )
+                removed += 1
+        if removed:
+            logger.info(
+                "Collapsed %s duplicate player_admin_notes before unique index",
+                removed,
+            )
+
+        conn.execute(
+            text(
+                f"CREATE UNIQUE INDEX {index_name} ON player_admin_notes "
+                f"(platform, external_id, author_user_id)"
+            )
+        )
+    logger.info("Created unique index %s on player_admin_notes", index_name)
+
+
 def run_migrations(engine: Engine) -> None:
     """Apply lightweight migrations for existing DBs created with older schemas."""
     if not _table_exists(engine, "servers"):
@@ -244,6 +311,23 @@ def run_migrations(engine: Engine) -> None:
     # whose canonical identity drops the prefix (gdk_/xsx_ → xbox).
     if _table_exists(engine, "player_action_logs"):
         _add_column(engine, "player_action_logs", "net_id VARCHAR(64) DEFAULT ''")
+
+    # Multi-user attribution. The users / server_grants / auth_tokens tables
+    # themselves need nothing here - main.py runs create_all() before this, and
+    # create_all is checkfirst, so brand-new tables appear on both dialects.
+    # Only columns added to *existing* tables need patching.
+    #
+    # No REFERENCES clause on purpose: SQLite cannot add an enforced foreign key
+    # via ALTER TABLE. Consequence - ON DELETE SET NULL will not fire on upgraded
+    # SQLite databases, so services/users.py::delete_user nulls these explicitly.
+    if _table_exists(engine, "command_history"):
+        _add_column(engine, "command_history", "actor_user_id INTEGER")
+    if _table_exists(engine, "player_action_logs"):
+        _add_column(engine, "player_action_logs", "actor_user_id INTEGER")
+        _add_column(engine, "player_action_logs", "actor_label VARCHAR(255) DEFAULT ''")
+    if _table_exists(engine, "player_admin_notes"):
+        _add_column(engine, "player_admin_notes", "author_user_id INTEGER")
+        _ensure_player_note_author_unique(engine)
 
     _renormalize_unknown_identities(engine)
 

@@ -10,6 +10,9 @@
  *   mapX = (worldY - 158000) / 459
  *   mapY = (worldX + 123888) / 459
  *
+ * The 459 units-per-map-unit scale is unchanged since launch; only the framing
+ * of the basemap image differs between sources, which is what MAP_CRS encodes.
+ *
  * The basemap image covers map-space top-left → bottom-right as below.
  */
 
@@ -24,12 +27,24 @@ export const WORLD_TO_MAP_TRANSLATE_Y = 158000;
 export const WORLD_TO_MAP_SCALE = 459;
 
 /**
- * Map-space CRS for World_Map.webp (order xy).
- * topLeft / bottomRight match Map:Fragments/Core on the wiki.
+ * Map-space CRS for the bundled basemap (order xy).
+ *
+ * The image is paldb.cc's Palworld 1.0 render, whose extent is the landscape
+ * bounds rather than the wiki's DT_WorldMapUIData frame:
+ *   worldX ∈ [-1099400, 349400], worldY ∈ [-724400, 724400]
+ * Divided through by the 459 scale that gives, exactly:
+ *   topLeft     = (-882400 / 459,  473288 / 459)
+ *   bottomRight = ( 566400 / 459, -975512 / 459)
+ * Verified against 1.0 boss/incident coordinates and by phase-correlating this
+ * image against the previous wiki basemap (predicted offset -82.1 / -557.0 px
+ * at 8192², measured -72 / -560).
+ *
+ * If we ever move back to the wiki's World_Map.webp, its frame is
+ *   topLeft { -1954.07407407, 1245.7254902 }, bottomRight { 1200.26143791, -1908.61002179 }.
  */
 export const MAP_CRS = {
-  topLeft: { mapX: -1954.07407407, mapY: 1245.7254902 },
-  bottomRight: { mapX: 1200.26143791, mapY: -1908.61002179 },
+  topLeft: { mapX: -1922.44008715, mapY: 1031.12854031 },
+  bottomRight: { mapX: 1233.98692810, mapY: -2125.29847495 },
 } as const;
 
 const MAP_WIDTH = MAP_CRS.bottomRight.mapX - MAP_CRS.topLeft.mapX;
@@ -39,7 +54,7 @@ const MAP_HEIGHT = MAP_CRS.topLeft.mapY - MAP_CRS.bottomRight.mapY;
  * Bundled basemap (served from /public).
  * Bump the query when the asset is re-encoded so browsers drop a stale cache.
  */
-export const PALPAGOS_MAP_URL = "/palworld/palpagos-map.webp?v=8192q95";
+export const PALPAGOS_MAP_URL = "/palworld/palpagos-map.webp?v=1.0-8192q95";
 
 export function worldToMap(worldX: number, worldY: number): MapPoint {
   return {

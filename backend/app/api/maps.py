@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import require_admin
 from app.models import MapConfig
 from app.schemas import MapOut
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter, is_known_type
@@ -34,7 +33,6 @@ def _map_out(row: MapConfig) -> MapOut:
 def list_maps(
     server_type: str | None = None,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> list[MapOut]:
     q = db.query(MapConfig)
     if server_type:
@@ -49,7 +47,6 @@ def list_maps(
 @router.get("/gamemode-labels")
 def gamemode_labels(
     server_type: str = DEFAULT_SERVER_TYPE,
-    _admin: str = Depends(require_admin),
 ) -> dict[str, str]:
     st = server_type.strip().lower() or DEFAULT_SERVER_TYPE
     try:

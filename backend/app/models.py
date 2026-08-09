@@ -20,12 +20,135 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+ROLE_ADMIN = "admin"
+ROLE_USER = "user"
+
+# The only grant level today. Reserved so a future read-only tier is a
+# behaviour change rather than a schema change.
+GRANT_OPERATOR = "operator"
+
+TOKEN_PURPOSE_INVITE = "invite"
+TOKEN_PURPOSE_RESET = "reset"
+
+
 class AdminAuth(Base):
+    """Bootstrap credential only.
+
+    Seeded from ADMIN_PASSWORD on first boot. It is not a login: its single
+    remaining job is to authorise the one-time claim that creates the first
+    real admin in ``users``. See api/auth.py::bootstrap_claim.
+    """
+
     __tablename__ = "admin_auth"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class User(Base):
+    """A person who can log in."""
+
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("email_ci", name="uq_users_email_ci"),
+        Index("ix_users_role_active", "role", "is_active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # As typed, for display and outbound mail.
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    # Lowercased; THE uniqueness key. A plain column rather than a functional
+    # unique index because UniqueConstraint cannot be expression-based, and
+    # Postgres citext has no SQLite counterpart.
+    email_ci: Mapped[str] = mapped_column(String(320), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    # "" means invited but never set a password. Login must always refuse it -
+    # an empty hash can never verify, but refuse explicitly rather than relying
+    # on that.
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default=ROLE_USER)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Bumped to invalidate every outstanding session cookie for this user
+    # (password change, "log out everywhere", admin deactivation).
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    # ---- TOTP ----
+    # Fernet ciphertext via security.encrypt_secret, never the raw base32.
+    totp_secret_enc: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    totp_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Highest accepted time-step counter. A TOTP code stays valid for its whole
+    # window, so without this the same six digits can be replayed within 30s.
+    totp_last_counter: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # JSON list of bcrypt hashes, matching the options_json/roster_json convention.
+    totp_recovery_hashes: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+
+    # ---- throttling / audit ----
+    failed_logins: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    grants: Mapped[list["ServerGrant"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="ServerGrant.user_id",
+    )
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == ROLE_ADMIN
+
+
+class ServerGrant(Base):
+    """A user's access to one server. Presence of a row == operator access."""
+
+    __tablename__ = "server_grants"
+    __table_args__ = (
+        UniqueConstraint("user_id", "server_id", name="uq_server_grant"),
+        Index("ix_server_grants_user", "user_id"),
+        Index("ix_server_grants_server", "server_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), nullable=False)
+    level: Mapped[str] = mapped_column(String(16), nullable=False, default=GRANT_OPERATOR)
+    granted_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="grants", foreign_keys=[user_id])
+    # Forward reference: Server is declared further down this module.
+    server: Mapped["Server"] = relationship()
+
+
+class AuthToken(Base):
+    """Single-use emailed token: password reset or invite."""
+
+    __tablename__ = "auth_tokens"
+    __table_args__ = (
+        Index("ix_auth_tokens_hash", "token_hash", unique=True),
+        Index("ix_auth_tokens_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    # sha256 hex of a 256-bit urlsafe token. Deliberately not bcrypt: bcrypt
+    # cannot be indexed (every lookup becomes a full scan), and a 256-bit random
+    # value has no low-entropy guess space for a slow KDF to protect.
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    requested_ip: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    user: Mapped[User] = relationship()
 
 
 class Server(Base):
@@ -223,6 +346,10 @@ class CommandHistory(Base):
     server_id: Mapped[int | None] = mapped_column(ForeignKey("servers.id", ondelete="SET NULL"), nullable=True)
     command: Mapped[str] = mapped_column(Text, nullable=False)
     response: Mapped[str] = mapped_column(Text, default="")
+    # Who ran it. Null for rows written before the multi-user module.
+    actor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     server: Mapped[Server | None] = relationship(back_populates="history")
@@ -288,19 +415,41 @@ class PlayerActionLog(Base):
     detail: Mapped[str] = mapped_column(String(255), default="")
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str] = mapped_column(Text, default="")
+    # Which operator performed the action. actor_label freezes their email at
+    # write time so the moderation log stays readable after the user is deleted.
+    actor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_label: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class PlayerAdminNote(Base):
-    """Admin free-text notes attached to a platform identity."""
+    """Per-author free-text note attached to a platform identity.
+
+    Each user may own at most one note per identity. Everyone with access can
+    read every note; only the author may edit or delete theirs. Legacy rows
+    with a null author remain readable; only an admin may delete those.
+    """
 
     __tablename__ = "player_admin_notes"
-    __table_args__ = (Index("ix_player_notes_identity", "platform", "external_id"),)
+    __table_args__ = (
+        Index("ix_player_notes_identity", "platform", "external_id"),
+        # One note per author per identity. Multiple NULL authors are allowed
+        # (legacy rows) on both SQLite and Postgres.
+        UniqueConstraint(
+            "platform", "external_id", "author_user_id", name="uq_player_note_author"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     platform: Mapped[str] = mapped_column(String(32), nullable=False, default="steam")
     external_id: Mapped[str] = mapped_column(String(128), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Who wrote it. Only the author may edit or delete the note.
+    author_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

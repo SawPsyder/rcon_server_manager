@@ -21,8 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.api.servers import get_rcon_password, get_server_or_404
 from app.database import get_db
-from app.deps import require_admin
-from app.models import CommandHistory, Server
+from app.deps import CurrentUser
+from app.models import CommandHistory, Server, User
 from app.schemas import (
     AnnounceRequest,
     ConfirmRequest,
@@ -101,7 +101,13 @@ def _client(db: Session, server_id: int) -> tuple[Server, PalworldClient]:
         return server, client_for_server(server, secret, timeout=API_TIMEOUT)
 
 
-def _log(db: Session, server: Server, command: str, response: str = "") -> None:
+def _log(
+    db: Session,
+    server: Server,
+    command: str,
+    response: str = "",
+    actor: User | None = None,
+) -> None:
     """Record an admin action in the shared command history."""
     try:
         db.add(
@@ -109,6 +115,7 @@ def _log(db: Session, server: Server, command: str, response: str = "") -> None:
                 server_id=server.id,
                 command=f"palworld:{command}"[:2000],
                 response=(response or "ok")[:4000],
+                actor_user_id=actor.id if actor else None,
             )
         )
         db.commit()
@@ -128,8 +135,8 @@ def _require_confirm(confirm: bool, what: str) -> None:
 @router.get("/info", response_model=PalworldInfoOut)
 def info(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> PalworldInfoOut:
     _, client = _client(db, server_id)
     with _api_errors():
@@ -139,8 +146,8 @@ def info(
 @router.get("/metrics", response_model=PalworldMetricsOut)
 def metrics(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> PalworldMetricsOut:
     _, client = _client(db, server_id)
     with _api_errors():
@@ -150,8 +157,8 @@ def metrics(
 @router.get("/settings", response_model=PalworldSettingsOut)
 def settings(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> PalworldSettingsOut:
     _, client = _client(db, server_id)
     with _api_errors():
@@ -161,8 +168,8 @@ def settings(
 @router.get("/players", response_model=PalworldPlayersOut)
 def players(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> PalworldPlayersOut:
     _, client = _client(db, server_id)
     with _api_errors():
@@ -426,8 +433,8 @@ def summarize_game_data(payload: Mapping[str, Any]) -> PalworldWorldOut:
 @router.get("/world", response_model=PalworldWorldOut)
 def world(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> PalworldWorldOut:
     _, client = _client(db, server_id)
     try:
@@ -446,59 +453,59 @@ def world(
 @router.post("/announce", response_model=PalworldActionOut)
 def announce(
     server_id: int,
+    user: CurrentUser,
     body: AnnounceRequest,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> PalworldActionOut:
     server, client = _client(db, server_id)
     message = body.message.strip()
     with _api_errors():
         detail = client.announce(message)
-    _log(db, server, f"announce {message}", detail)
+    _log(db, server, f"announce {message}", detail, actor=user)
     return PalworldActionOut(ok=True, detail=detail)
 
 
 @router.post("/save", response_model=PalworldActionOut)
 def save(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> PalworldActionOut:
     server, client = _client(db, server_id)
     with _api_errors():
         detail = client.save()
-    _log(db, server, "save", detail)
+    _log(db, server, "save", detail, actor=user)
     return PalworldActionOut(ok=True, detail=detail)
 
 
 @router.post("/shutdown", response_model=PalworldActionOut)
 def shutdown(
     server_id: int,
+    user: CurrentUser,
     body: PalworldShutdownRequest,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> PalworldActionOut:
     _require_confirm(body.confirm, "Shutting the server down")
     server, client = _client(db, server_id)
     message = body.message.strip()
     with _api_errors():
         detail = client.shutdown(body.waittime, message)
-    _log(db, server, f"shutdown {body.waittime} {message}".strip(), detail)
+    _log(db, server, f"shutdown {body.waittime} {message}".strip(), detail, actor=user)
     return PalworldActionOut(ok=True, detail=detail)
 
 
 @router.post("/stop", response_model=PalworldActionOut)
 def stop(
     server_id: int,
+    user: CurrentUser,
     body: ConfirmRequest,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> PalworldActionOut:
     _require_confirm(body.confirm, "Force-stopping the server")
     server, client = _client(db, server_id)
     with _api_errors():
         detail = client.stop()
-    _log(db, server, "stop", detail)
+    _log(db, server, "stop", detail, actor=user)
     return PalworldActionOut(
         ok=True,
         # /stop terminates immediately without writing the world

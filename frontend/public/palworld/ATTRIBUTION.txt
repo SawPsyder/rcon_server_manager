@@ -1,14 +1,30 @@
 palpagos-map.webp
 ================
 
-Source: Palworld Wiki (wiki.gg) — File:World Map.webp
+Current source: paldb.cc — Palpagos Islands map tiles (game version 1.0)
+  https://paldb.cc/en/Palpagos_Islands
+  Tiles: https://cdn.paldb.cc/image/map8/z4x{x}y{y}.webp
+  Rendered by paldb.cc on 2026-07-10 (Palworld 1.0 launch day).
+  Stitched here from the 16 x 16 grid of 512 px tiles at zoom 4 and re-encoded
+  as lossy WebP quality 95, giving the full 8192 x 8192 image.
+
+Previous source: Palworld Wiki (wiki.gg) — File:World Map.webp
   https://palworld.wiki.gg/wiki/File:World_Map.webp
+  Uploaded 2025-12-09, 8192 x 8192. Still the only revision as of 2026-08-08,
+  so it predates Palworld 1.0 (7 new Palpagos islands, reworked sanctuaries,
+  new fast-travel points, adjusted playable boundary). Prefer switching back to
+  it if wiki.gg publishes a 1.0 revision — same art, cleaner licensing story.
 
-Shipped at full resolution 8192 × 8192 as lossy WebP quality 95.
+The two sources frame the world differently, so MAP_CRS in
+frontend/src/lib/palworldMapCoords.ts must be changed along with the image.
+Both sets of constants are recorded there. The 459 world-units-per-map-unit
+scale is the same for both.
 
-This image is from Palworld and is copyright Pocketpair, Inc.
-It is bundled here solely so server operators can place live player and
-base-camp positions on the in-game world map inside the admin UI.
-
-Coordinate projection constants follow DT_WorldMapUIData.json as documented at:
+Coordinate projection constants originate from DT_WorldMapUIData.json as
+documented at:
   https://palworld.wiki.gg/wiki/Maps
+
+This image is from Palworld and is copyright Pocketpair, Inc. paldb.cc is a
+fan site unaffiliated with Pocketpair. It is bundled here solely so server
+operators can place live player and base-camp positions on the in-game world
+map inside the admin UI.

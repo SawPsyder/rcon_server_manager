@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from app.api.servers import get_server_or_404
 from app.api.stats import PublicPlayerStatsOut, build_player_stats, to_public_stats
 from app.database import get_db
-from app.deps import require_admin
 from app.models import ChartShare, Server, utcnow
 
 admin_router = APIRouter(prefix="/api/servers", tags=["chart-share"])
@@ -57,7 +56,6 @@ def _get_share_by_token(db: Session, token: str) -> ChartShare:
 def get_chart_share(
     server_id: int,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> ChartShareOut:
     get_server_or_404(db, server_id)
     row = db.query(ChartShare).filter(ChartShare.server_id == server_id).first()
@@ -70,7 +68,6 @@ def get_chart_share(
 def create_or_get_chart_share(
     server_id: int,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> ChartShareOut:
     get_server_or_404(db, server_id)
     row = db.query(ChartShare).filter(ChartShare.server_id == server_id).first()
@@ -96,7 +93,6 @@ def create_or_get_chart_share(
 def revoke_chart_share(
     server_id: int,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> Response:
     get_server_or_404(db, server_id)
     row = db.query(ChartShare).filter(ChartShare.server_id == server_id).first()

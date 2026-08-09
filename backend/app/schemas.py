@@ -4,17 +4,197 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+# bcrypt truncates past 72 bytes, so a longer password would have a silently
+# ignored tail. Reject instead.
+PASSWORD_MIN = 10
+PASSWORD_MAX = 72
+
+
 class LoginRequest(BaseModel):
-    password: str
+    email: str = Field(min_length=1, max_length=320)
+    password: str = Field(min_length=1, max_length=PASSWORD_MAX)
+    turnstile_token: str = ""
+
+
+class TotpLoginRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+
+
+class BootstrapClaimRequest(BaseModel):
+    """Promote yourself to the first admin using ADMIN_PASSWORD."""
+
+    email: str = Field(min_length=1, max_length=320)
+    password: str = Field(min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)
+    display_name: str = Field(default="", max_length=120)
+    admin_password: str = Field(min_length=1)
+    turnstile_token: str = ""
+
+
+class BootstrapStatus(BaseModel):
+    available: bool
 
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=6)
+    new_password: str = Field(min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(min_length=1, max_length=320)
+    turnstile_token: str = ""
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=1)
+    password: str = Field(min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)
+
+
+class ResetPasswordResult(BaseModel):
+    """Password was set; the client must sign in through the normal login path."""
+
+    ok: bool = True
+
+
+class ResetTokenStatus(BaseModel):
+    """Whether a reset/invite token is still redeemable (probe only; does not consume)."""
+
+    valid: bool
+
+
+class CurrentUserOut(BaseModel):
+    id: int
+    email: str
+    display_name: str
+    role: str
+    is_admin: bool
+    totp_enabled: bool
+    # Servers this user may operate. Empty and is_admin=True means "all".
+    server_ids: list[int] = Field(default_factory=list)
 
 
 class AuthStatus(BaseModel):
     authenticated: bool
+    user: CurrentUserOut | None = None
+    # Set when the password was right but a TOTP code is still required.
+    mfa_required: bool = False
+
+
+class PublicConfig(BaseModel):
+    """Unauthenticated config the login screen needs before anyone is signed in."""
+
+    turnstile_enabled: bool = False
+    turnstile_site_key: str = ""
+    smtp_enabled: bool = False
+    bootstrap_available: bool = False
+
+
+class TotpSetupOut(BaseModel):
+    secret: str
+    otpauth_uri: str
+
+
+class TotpConfirmRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+
+
+class TotpDisableRequest(BaseModel):
+    current_password: str
+
+
+class TotpSetupRequest(BaseModel):
+    current_password: str
+
+
+class TotpConfirmOut(BaseModel):
+    recovery_codes: list[str]
+
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    display_name: str
+    role: str
+    is_active: bool
+    totp_enabled: bool
+    has_password: bool
+    # Temporary lock after failed sign-ins (distinct from is_active=False).
+    is_locked: bool = False
+    locked_until: datetime | None = None
+    failed_logins: int = 0
+    server_ids: list[int] = Field(default_factory=list)
+    last_login_at: datetime | None = None
+    created_at: datetime
+
+
+class UserCreateRequest(BaseModel):
+    email: str = Field(min_length=1, max_length=320)
+    display_name: str = Field(default="", max_length=120)
+    role: str = "user"
+    server_ids: list[int] = Field(default_factory=list)
+
+
+class UserAdminUpdate(BaseModel):
+    """Admin-editable fields. Never reuse this on a self-service endpoint."""
+
+    display_name: str | None = Field(default=None, max_length=120)
+    role: str | None = None
+    is_active: bool | None = None
+
+
+class UserSelfUpdate(BaseModel):
+    """Deliberately separate from UserAdminUpdate.
+
+    Sharing one model between the admin and self endpoints is the classic
+    mass-assignment escalation: {"role": "admin"} in a PATCH /me body.
+    """
+
+    display_name: str = Field(default="", max_length=120)
+
+
+class GrantsUpdate(BaseModel):
+    server_ids: list[int] = Field(default_factory=list)
+
+
+class InviteLinkOut(BaseModel):
+    """Returned when a link could not be emailed, so an admin can pass it on."""
+
+    user: UserOut
+    invite_url: str = ""
+    emailed: bool = False
+
+
+class TestEmailRequest(BaseModel):
+    to_address: str = Field(min_length=1, max_length=320)
+
+
+class MailSettingsOut(BaseModel):
+    host: str = ""
+    port: int = 587
+    user: str = ""
+    # The password itself is never returned.
+    has_password: bool = False
+    starttls: bool = True
+    ssl: bool = False
+    from_address: str = ""
+    from_name: str = ""
+    base_url: str = ""
+    # Whether a message could actually be sent right now.
+    enabled: bool = False
+    # False while the settings still come from environment variables.
+    configured: bool = False
+
+
+class MailSettingsUpdate(BaseModel):
+    host: str = Field(default="", max_length=255)
+    port: int = Field(default=587, ge=1, le=65535)
+    user: str = Field(default="", max_length=255)
+    # Omit to keep the stored password; "" clears it.
+    password: str | None = Field(default=None, max_length=255)
+    starttls: bool = True
+    ssl: bool = False
+    from_address: str = Field(default="", max_length=320)
+    from_name: str = Field(default="Sandstorm Server Manager", max_length=120)
+    base_url: str = Field(default="", max_length=255)
 
 
 class ServerFeaturesOut(BaseModel):
@@ -96,7 +276,8 @@ class ServerOut(BaseModel):
     name: str
     host: str
     query_port: int
-    rcon_port: int
+    # Redacted to null for non-admin viewers - see api/servers.py::_to_out.
+    rcon_port: int | None = None
     server_type: str
     preferred_gamemode: str | None = None
     has_rcon_password: bool
@@ -432,6 +613,8 @@ class PlayerNoteOut(BaseModel):
     platform: str
     external_id: str
     body: str
+    author_user_id: int | None = None
+    author_label: str = ""
     created_at: datetime
     updated_at: datetime
 
@@ -439,7 +622,7 @@ class PlayerNoteOut(BaseModel):
 
 
 class PlayerNoteCreate(BaseModel):
-    """Full note document body. Empty string clears the note."""
+    """Body for the caller's own note. Empty string deletes their note."""
 
     body: str = Field(default="", max_length=20000)
 
