@@ -18,6 +18,8 @@ import IdentityInfoButton from "../components/IdentityInfoButton";
 import PlayerStatsChart from "../components/PlayerStatsChart";
 import TickRateChart from "../components/TickRateChart";
 import PalworldAdminPanel from "../components/PalworldAdminPanel";
+import PterodactylPanel from "../components/PterodactylPanel";
+import ResourceHistoryChart from "../components/ResourceHistoryChart";
 import SatisfactoryAdminPanel from "../components/SatisfactoryAdminPanel";
 import { overviewBackSearch } from "./OverviewPage";
 
@@ -569,6 +571,12 @@ export default function ServerDetailPage() {
 
       {status?.error && <div className="alert error">{status.error}</div>}
 
+      {/* Live container utilisation + power controls. Chart is separate so it
+          sits with the other history charts below rather than splitting them. */}
+      {validServerId && selectedServer?.pterodactyl_linked && (
+        <PterodactylPanel serverId={validServerId} onChanged={refreshStatus} />
+      )}
+
       <PlayerStatsChart serverId={validServerId} showShare />
 
       {/* Separate chart, not a second axis on the player one - tick rate and
@@ -580,6 +588,10 @@ export default function ServerDetailPage() {
           unit={tickRate.unit}
           target={tickRate.target}
         />
+      )}
+
+      {validServerId && selectedServer?.pterodactyl_linked && (
+        <ResourceHistoryChart serverId={validServerId} />
       )}
 
       {/* Hidden only for games that expose no per-player data at all

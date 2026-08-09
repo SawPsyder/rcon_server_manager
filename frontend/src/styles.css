@@ -179,9 +179,12 @@ code {
 }
 
 /* .login-card h1 is handled above - the card is a flex column, so its gap
-   provides the spacing and a bottom margin here would stack on top of it. */
+   provides the spacing and a bottom margin here would stack on top of it.
+   Match chart titles (Players / tick / container load): 1rem, not browser h2. */
 .card h2 {
   margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 700;
 }
 
 .muted {
@@ -696,6 +699,7 @@ tbody tr.selected {
 
 .chart-card h2 {
   margin-top: 0;
+  margin-bottom: 0;
 }
 
 .chart-card-compact {
@@ -704,10 +708,6 @@ tbody tr.selected {
   box-shadow: none;
   padding: 0;
   margin: 0;
-}
-
-.chart-card-compact h2 {
-  font-size: 1rem;
 }
 
 .range-tabs {

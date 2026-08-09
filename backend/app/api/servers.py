@@ -15,9 +15,14 @@ from app.schemas import (
 )
 from app.security import decrypt_secret, encrypt_secret
 from app.server_types import DEFAULT_SERVER_TYPE, get_adapter, is_known_type, list_server_types
-from app.services.server_options import load_options, merge_options
+from app.services.server_options import load_options, merge_options, option_str
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
+
+
+# Options that describe how we reach the game server. Changing one of these
+# must drop pooled connections; the Pterodactyl link deliberately must not.
+CONNECTION_OPTION_KEYS = ("use_https", "verify_tls", "cert_fingerprint")
 
 
 def _options_out(server: Server) -> ServerOptionsOut:
@@ -26,7 +31,14 @@ def _options_out(server: Server) -> ServerOptionsOut:
         use_https=bool(options.get("use_https", False)),
         verify_tls=bool(options.get("verify_tls", False)),
         cert_fingerprint=str(options.get("cert_fingerprint", "") or ""),
+        pterodactyl_uuid=str(options.get("pterodactyl_uuid", "") or ""),
+        pterodactyl_identifier=str(options.get("pterodactyl_identifier", "") or ""),
+        pterodactyl_name=str(options.get("pterodactyl_name", "") or ""),
     )
+
+
+def _pterodactyl_linked(server: Server) -> bool:
+    return bool(str(load_options(server).get("pterodactyl_uuid", "") or "").strip())
 
 
 def _to_out(server: Server, viewer: User | None = None) -> ServerOut:
@@ -37,6 +49,12 @@ def _to_out(server: Server, viewer: User | None = None) -> ServerOut:
     operator widens the blast radius of a leaked password for no UI benefit.
     Host and query port stay - they are the public game endpoint every player
     already knows, and the detail page seeds its status card from them.
+
+    ``pterodactyl_linked`` is deliberately outside the redacted block. It is
+    not a credential and not a route to anything - the panel key is global and
+    never leaves the backend - and a granted operator may use the resource
+    panel, so the UI has to know it exists. The uuid behind it stays inside
+    ``options`` and stays admin-only.
     """
     redact = viewer is not None and not viewer.is_admin
     return ServerOut(
@@ -49,6 +67,7 @@ def _to_out(server: Server, viewer: User | None = None) -> ServerOut:
         preferred_gamemode=server.preferred_gamemode,
         has_rcon_password=bool(server.rcon_password_enc),
         options=ServerOptionsOut() if redact else _options_out(server),
+        pterodactyl_linked=_pterodactyl_linked(server),
         last_hostname=getattr(server, "last_hostname", None),
         last_map=getattr(server, "last_map", None),
         last_lighting=getattr(server, "last_lighting", None),
@@ -77,7 +96,30 @@ def _normalize_ports(server: Server) -> None:
         server.rcon_port = server.query_port
 
 
-def _apply_options(server: Server, options) -> None:
+def _assert_pterodactyl_uuid_available(
+    db: Session, uuid: str, *, exclude_server_id: int | None = None
+) -> None:
+    """Reject linking a panel container that another app server already claims.
+
+    Two servers pointing at the same UUID would double-poll the same container,
+    write history under different server_ids, and both accept power signals.
+    """
+    if not uuid:
+        return
+    for other in db.query(Server).all():
+        if exclude_server_id is not None and other.id == exclude_server_id:
+            continue
+        if option_str(other, "pterodactyl_uuid") == uuid:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f'Pterodactyl container is already linked to "{other.name}". '
+                    "Unlink it there first, or pick a different container."
+                ),
+            )
+
+
+def _apply_options(server: Server, options, db: Session | None = None) -> None:
     if options is None:
         return
     updates = options.model_dump(exclude_unset=True)
@@ -85,7 +127,38 @@ def _apply_options(server: Server, options) -> None:
         from app.services.tls_pins import normalize_fingerprint
 
         updates["cert_fingerprint"] = normalize_fingerprint(updates["cert_fingerprint"])
+    if "pterodactyl_uuid" in updates:
+        # Panel UUIDs are lowercase hex; normalising means a pasted uppercase
+        # value still matches the inventory list. "" unlinks.
+        uuid = str(updates.get("pterodactyl_uuid") or "").strip().lower()
+        updates["pterodactyl_uuid"] = uuid
+        if not uuid:
+            # Don't leave the cached display labels behind pointing at nothing.
+            updates["pterodactyl_identifier"] = ""
+            updates["pterodactyl_name"] = ""
+        elif db is not None:
+            # Re-saving the same link on this server is fine; another server is not.
+            _assert_pterodactyl_uuid_available(
+                db, uuid, exclude_server_id=getattr(server, "id", None)
+            )
     merge_options(server, updates)
+
+
+def _connection_options_changed(server: Server, options) -> bool:
+    """Whether an options update touches how we reach the game server.
+
+    Only these keys justify tearing down pooled RCON / API sessions. The
+    Pterodactyl link lives in the same JSON blob but addresses the panel, not
+    the game server, so linking one must not drop a live console session.
+    """
+    if options is None:
+        return False
+    updates = options.model_dump(exclude_unset=True)
+    current = load_options(server)
+    return any(
+        key in updates and updates[key] != current.get(key)
+        for key in CONNECTION_OPTION_KEYS
+    )
 
 
 @router.get("/types", response_model=list[ServerTypeOut])
@@ -148,7 +221,7 @@ def create_server(
         preferred_gamemode=preferred,
         options_json="{}",
     )
-    _apply_options(server, body.options)
+    _apply_options(server, body.options, db=db)
     _normalize_ports(server)
     db.add(server)
     db.commit()
@@ -191,7 +264,7 @@ def update_server(
         endpoint_changed = True
     if body.query_port is not None and body.query_port != server.query_port:
         endpoint_changed = True
-    if body.rcon_password is not None or body.options is not None:
+    if body.rcon_password is not None or _connection_options_changed(server, body.options):
         endpoint_changed = True
     if body.server_type is not None and body.server_type != server.server_type:
         endpoint_changed = True
@@ -212,7 +285,7 @@ def update_server(
         server.preferred_gamemode = body.preferred_gamemode.strip() or None
     if body.rcon_password is not None:
         server.rcon_password_enc = encrypt_secret(body.rcon_password) if body.rcon_password else ""
-    _apply_options(server, body.options)
+    _apply_options(server, body.options, db=db)
     _normalize_ports(server)
     db.commit()
     db.refresh(server)

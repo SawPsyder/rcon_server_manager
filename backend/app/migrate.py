@@ -245,6 +245,53 @@ def run_migrations(engine: Engine) -> None:
         else:
             _add_column(engine, "player_server_stats", "previous_seen_at TIMESTAMP")
 
+    # pterodactyl_samples: container utilisation history, on its own 20s clock
+    if not _table_exists(engine, "pterodactyl_samples"):
+        if dialect == "postgresql":
+            ddl = """
+            CREATE TABLE pterodactyl_samples (
+                id BIGSERIAL PRIMARY KEY,
+                server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                recorded_at TIMESTAMPTZ NOT NULL,
+                state VARCHAR(16) NOT NULL DEFAULT 'offline',
+                cpu_absolute DOUBLE PRECISION NOT NULL DEFAULT 0,
+                memory_bytes BIGINT NOT NULL DEFAULT 0,
+                disk_bytes BIGINT NOT NULL DEFAULT 0,
+                network_rx_bytes BIGINT NOT NULL DEFAULT 0,
+                network_tx_bytes BIGINT NOT NULL DEFAULT 0,
+                uptime_ms BIGINT NOT NULL DEFAULT 0
+            );
+            CREATE INDEX ix_pterodactyl_samples_server_id ON pterodactyl_samples (server_id);
+            CREATE INDEX ix_pterodactyl_samples_recorded_at ON pterodactyl_samples (recorded_at);
+            CREATE INDEX ix_pterodactyl_samples_server_time
+                ON pterodactyl_samples (server_id, recorded_at);
+            """
+        else:
+            ddl = """
+            CREATE TABLE pterodactyl_samples (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                recorded_at DATETIME NOT NULL,
+                state VARCHAR(16) NOT NULL DEFAULT 'offline',
+                cpu_absolute REAL NOT NULL DEFAULT 0,
+                memory_bytes BIGINT NOT NULL DEFAULT 0,
+                disk_bytes BIGINT NOT NULL DEFAULT 0,
+                network_rx_bytes BIGINT NOT NULL DEFAULT 0,
+                network_tx_bytes BIGINT NOT NULL DEFAULT 0,
+                uptime_ms BIGINT NOT NULL DEFAULT 0
+            );
+            CREATE INDEX ix_pterodactyl_samples_server_id ON pterodactyl_samples (server_id);
+            CREATE INDEX ix_pterodactyl_samples_recorded_at ON pterodactyl_samples (recorded_at);
+            CREATE INDEX ix_pterodactyl_samples_server_time
+                ON pterodactyl_samples (server_id, recorded_at);
+            """
+        with engine.begin() as conn:
+            for stmt in ddl.strip().split(";"):
+                s = stmt.strip()
+                if s:
+                    conn.execute(text(s))
+        logger.info("Created table pterodactyl_samples (%s)", dialect)
+
     # chart_shares: public cryptic chart share tokens
     if not _table_exists(engine, "chart_shares"):
         if dialect == "postgresql":

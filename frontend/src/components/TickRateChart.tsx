@@ -172,7 +172,7 @@ export default function TickRateChart({
     <section className="card chart-card">
       <div className="row between wrap" style={{ alignItems: "center" }}>
         <div className="row wrap" style={{ alignItems: "center", gap: "0.6rem" }}>
-          <h2 style={{ margin: 0, fontSize: "1rem" }}>{label}</h2>
+          <h2 style={{ margin: 0 }}>{label}</h2>
           <div className="chart-summary row wrap">
             <span className="chip">
               Latest: <strong>{stats?.current_tick_rate ?? "-"}</strong>

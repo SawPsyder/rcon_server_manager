@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -193,6 +193,128 @@ class MailSettingsUpdate(BaseModel):
     base_url: str = Field(default="", max_length=255)
 
 
+class PterodactylSettingsOut(BaseModel):
+    base_url: str = ""
+    # The key itself is never returned.
+    has_api_key: bool = False
+    verify_tls: bool = True
+    # Whether a panel call could actually be made right now. This can be False
+    # while has_api_key is True: rotating ENCRYPTION_KEY leaves an undecryptable
+    # ciphertext behind, and decrypt_secret returns "" rather than raising.
+    enabled: bool = False
+
+
+class PterodactylSettingsUpdate(BaseModel):
+    base_url: str = Field(default="", max_length=255)
+    # Omit to keep the stored key; "" clears it.
+    api_key: str | None = Field(default=None, max_length=255)
+    verify_tls: bool = True
+
+
+class PterodactylTestOut(BaseModel):
+    """Result of the Test-connection button.
+
+    Unlike the mail test this returns a body rather than 204: the number of
+    visible servers is what tells an admin the key is the right *kind*, since
+    an Application key fails outright while a Client key with no server access
+    succeeds but sees nothing.
+    """
+
+    detail: str = ""
+    server_count: int = 0
+
+
+class PterodactylServerOut(BaseModel):
+    """One panel server, for the linking dropdown."""
+
+    uuid: str
+    identifier: str = ""
+    name: str = ""
+    node: str = ""
+    # "" is healthy; the panel sends null. Otherwise installing / suspended / ...
+    status: str = ""
+    is_suspended: bool = False
+    # MiB, 0 = unlimited
+    memory_limit_mb: int = 0
+    disk_limit_mb: int = 0
+    # Percent of one host CPU (100 = one core), 0 = unlimited
+    cpu_limit: int = 0
+    # Set when one of our servers already claims this panel server.
+    linked_server_id: int | None = None
+
+
+class PterodactylResourcesOut(BaseModel):
+    """Live utilisation for a linked server.
+
+    Limits are echoed as bytes (the panel reports MiB) so the UI does no unit
+    maths, and are None when the panel says unlimited - which it encodes as 0,
+    the value most likely to become a division.
+    """
+
+    name: str = ""
+    # Admin-only; used to deep-link into the panel. "" for other viewers.
+    identifier: str = ""
+    state: str = "offline"
+    is_suspended: bool = False
+    # Non-empty means installing / transferring / restoring - power will 409.
+    panel_status: str = ""
+    memory_bytes: int = 0
+    memory_limit_bytes: int | None = None
+    disk_bytes: int = 0
+    disk_limit_bytes: int | None = None
+    # 100.0 is one full host core.
+    cpu_absolute: float = 0.0
+    cpu_limit: int | None = None
+    # Cumulative since the container started; these reset on restart.
+    network_rx_bytes: int = 0
+    network_tx_bytes: int = 0
+    uptime_ms: int = 0
+    # How long ago this reading was fetched from the panel. A background poller
+    # refreshes every linked server, so the answer is usually not "just now" -
+    # saying so beats implying the number is live.
+    age_seconds: float = 0.0
+
+
+class PterodactylHistoryPoint(BaseModel):
+    """One sample (or mid-of-chunk when the series was thinned to the chart cap)."""
+
+    t: datetime
+    cpu_absolute: float | None = None
+    cpu_peak: float | None = None
+    memory_bytes: int | None = None
+    memory_peak: int | None = None
+    samples: int = 0
+
+
+class PterodactylHistoryOut(BaseModel):
+    server_id: int
+    range: str
+    from_time: datetime
+    to_time: datetime
+    # Approximate spacing of returned points (compat field; not used for grouping).
+    bucket_seconds: int
+    points: list[PterodactylHistoryPoint] = Field(default_factory=list)
+    # Summaries over every raw sample in range, including rows dropped by thinning.
+    current_cpu_absolute: float | None = None
+    peak_cpu_absolute: float | None = None
+    avg_cpu_absolute: float | None = None
+    current_memory_bytes: int | None = None
+    peak_memory_bytes: int | None = None
+    avg_memory_bytes: int | None = None
+
+
+class PterodactylPowerRequest(BaseModel):
+    signal: Literal["start", "stop", "restart", "kill"]
+    # Required for the signals that interrupt play without a clean shutdown.
+    confirm: bool = False
+
+
+class PterodactylPowerOut(BaseModel):
+    signal: str
+    # The panel acknowledges asynchronously, so this never claims the state changed.
+    detail: str = ""
+
+
 class ServerFeaturesOut(BaseModel):
     map_travel: bool = False
     structured_player_list: bool = False
@@ -235,12 +357,24 @@ class ServerOptionsIn(BaseModel):
     use_https: bool | None = None
     verify_tls: bool | None = None
     cert_fingerprint: str | None = Field(default=None, max_length=128)
+    # Link to a Pterodactyl panel server. "" unlinks. Type-independent, unlike
+    # the TLS trio above.
+    pterodactyl_uuid: str | None = Field(default=None, max_length=64)
+    # Cached at link time so the Servers table can name the link without
+    # calling the panel.
+    pterodactyl_identifier: str | None = Field(default=None, max_length=32)
+    pterodactyl_name: str | None = Field(default=None, max_length=255)
 
 
 class ServerOptionsOut(BaseModel):
     use_https: bool = False
     verify_tls: bool = False
     cert_fingerprint: str = ""
+    # Panel inventory: admin-only, blank for a redacted viewer. Whether a link
+    # exists at all is on ServerOut.pterodactyl_linked, which is never redacted.
+    pterodactyl_uuid: str = ""
+    pterodactyl_identifier: str = ""
+    pterodactyl_name: str = ""
 
 
 class ServerCreate(BaseModel):
@@ -278,6 +412,11 @@ class ServerOut(BaseModel):
     preferred_gamemode: str | None = None
     has_rcon_password: bool
     options: ServerOptionsOut = Field(default_factory=ServerOptionsOut)
+    # Whether a Pterodactyl server is linked. Deliberately outside `options`,
+    # which is redacted wholesale for non-admins: a granted operator may use
+    # the resource panel, so the UI has to know it exists. The uuid behind it
+    # stays admin-only.
+    pterodactyl_linked: bool = False
     # Cached from last successful status poll (instant UI)
     last_hostname: str | None = None
     last_map: str | None = None

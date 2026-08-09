@@ -50,6 +50,11 @@ export type ServerOptions = {
   use_https: boolean;
   verify_tls: boolean;
   cert_fingerprint: string;
+  /** Linked Pterodactyl container. Blank for non-admin viewers, and unlike the
+   *  TLS fields above this applies to every server type. */
+  pterodactyl_uuid: string;
+  pterodactyl_identifier: string;
+  pterodactyl_name: string;
 };
 
 export type Server = {
@@ -63,6 +68,10 @@ export type Server = {
   preferred_gamemode?: string | null;
   has_rcon_password: boolean;
   options: ServerOptions;
+  /** Whether a Pterodactyl container is linked. Outside `options` on purpose:
+   *  options are redacted wholesale for non-admins, but an operator may use
+   *  the resource panel, so the UI still has to know it exists. */
+  pterodactyl_linked: boolean;
   last_hostname?: string | null;
   last_map?: string | null;
   last_lighting?: string | null;
@@ -513,6 +522,106 @@ export type MailSettings = {
   configured: boolean;
 };
 
+export type PterodactylSettings = {
+  base_url: string;
+  /** The API key itself is never sent to the client. */
+  has_api_key: boolean;
+  verify_tls: boolean;
+  /** Whether a panel call could be made right now. Can be false while
+   *  has_api_key is true if ENCRYPTION_KEY changed and the stored key no
+   *  longer decrypts. */
+  enabled: boolean;
+};
+
+export type PterodactylSettingsUpdate = {
+  base_url: string;
+  /** Omit to keep the stored key; "" clears it. */
+  api_key?: string;
+  verify_tls: boolean;
+};
+
+export type PterodactylTestResult = {
+  detail: string;
+  server_count: number;
+};
+
+/** One container in the panel, for the server-linking dropdown. */
+export type PterodactylPanelServer = {
+  uuid: string;
+  identifier: string;
+  name: string;
+  node: string;
+  /** "" is healthy; otherwise installing / suspended / restoring_backup. */
+  status: string;
+  is_suspended: boolean;
+  /** MiB; 0 means unlimited. */
+  memory_limit_mb: number;
+  disk_limit_mb: number;
+  /** Percent of one host CPU (100 = one core); 0 means unlimited. */
+  cpu_limit: number;
+  /** Set when one of our servers already claims this container. */
+  linked_server_id: number | null;
+};
+
+export type PterodactylResources = {
+  name: string;
+  /** Admin-only; used to deep-link into the panel. */
+  identifier: string;
+  state: string;
+  is_suspended: boolean;
+  /** Non-empty means installing / transferring - power actions will 409. */
+  panel_status: string;
+  memory_bytes: number;
+  /** Null means unlimited. */
+  memory_limit_bytes: number | null;
+  disk_bytes: number;
+  disk_limit_bytes: number | null;
+  /** 100.0 is one full host core. */
+  cpu_absolute: number;
+  cpu_limit: number | null;
+  /** Cumulative since the container started; resets on restart. */
+  network_rx_bytes: number;
+  network_tx_bytes: number;
+  uptime_ms: number;
+  /** Age of this reading. A background poller refreshes every linked server,
+   *  so it is usually not zero - the card says so rather than implying live. */
+  age_seconds: number;
+};
+
+/** One bucket of container history. Metrics are null where nothing was
+ *  recorded, so an outage draws as a gap rather than an interpolated line. */
+export type PterodactylHistoryPoint = {
+  t: string;
+  cpu_absolute: number | null;
+  cpu_peak: number | null;
+  memory_bytes: number | null;
+  memory_peak: number | null;
+  samples: number;
+};
+
+export type PterodactylHistory = {
+  server_id: number;
+  range: StatsRange;
+  from_time: string;
+  to_time: string;
+  /** Internal downsample width; not shown in the UI (range tabs own the timespan). */
+  bucket_seconds: number;
+  points: PterodactylHistoryPoint[];
+  current_cpu_absolute: number | null;
+  peak_cpu_absolute: number | null;
+  avg_cpu_absolute: number | null;
+  current_memory_bytes: number | null;
+  peak_memory_bytes: number | null;
+  avg_memory_bytes: number | null;
+};
+
+export type PterodactylSignal = "start" | "stop" | "restart" | "kill";
+
+export type PterodactylPowerResult = {
+  signal: string;
+  detail: string;
+};
+
 export type MailSettingsUpdate = {
   host: string;
   port: number;
@@ -697,6 +806,37 @@ export const api = {
     test: () =>
       request<void>("/api/mail/test", {
         method: "POST",
+      }),
+  },
+
+  /** Global panel credentials and inventory. Admin-only server-side. */
+  pterodactyl: {
+    get: () => request<PterodactylSettings>("/api/pterodactyl"),
+    update: (data: PterodactylSettingsUpdate) =>
+      request<PterodactylSettings>("/api/pterodactyl", {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    test: () =>
+      request<PterodactylTestResult>("/api/pterodactyl/test", { method: "POST" }),
+    panelServers: (refresh = false) =>
+      request<PterodactylPanelServer[]>(
+        `/api/pterodactyl/servers${refresh ? "?refresh=true" : ""}`,
+      ),
+  },
+
+  /** Per-server resources and power. Usable by a granted operator. */
+  serverPterodactyl: {
+    resources: (id: number) =>
+      request<PterodactylResources>(`/api/servers/${id}/pterodactyl/resources`),
+    history: (id: number, range: StatsRange = "24h") =>
+      request<PterodactylHistory>(
+        `/api/servers/${id}/pterodactyl/history?range=${range}`,
+      ),
+    power: (id: number, signal: PterodactylSignal, confirm = false) =>
+      request<PterodactylPowerResult>(`/api/servers/${id}/pterodactyl/power`, {
+        method: "POST",
+        body: JSON.stringify({ signal, confirm }),
       }),
   },
 

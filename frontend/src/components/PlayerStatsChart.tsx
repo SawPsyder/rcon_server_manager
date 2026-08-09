@@ -245,16 +245,19 @@ export default function PlayerStatsChart({
   return (
     <section className={cardClass}>
       <div className="row between wrap" style={{ alignItems: "center" }}>
-        <div className="chart-summary row wrap">
-          <span className="chip">
-            Peak: <strong>{stats?.peak_players ?? "-"}</strong>
-          </span>
-          <span className="chip">
-            Avg: <strong>{stats?.avg_players ?? "-"}</strong>
-          </span>
-          <span className="chip">
-            Latest: <strong>{stats?.current_players ?? "-"}</strong>
-          </span>
+        <div className="row wrap" style={{ alignItems: "center", gap: "0.6rem" }}>
+          <h2 style={{ margin: 0 }}>Players</h2>
+          <div className="chart-summary row wrap">
+            <span className="chip">
+              Peak: <strong>{stats?.peak_players ?? "-"}</strong>
+            </span>
+            <span className="chip">
+              Avg: <strong>{stats?.avg_players ?? "-"}</strong>
+            </span>
+            <span className="chip">
+              Latest: <strong>{stats?.current_players ?? "-"}</strong>
+            </span>
+          </div>
         </div>
         <div className="row wrap" style={{ alignItems: "center", gap: "0.5rem" }}>
           {showShare && serverId ? (
