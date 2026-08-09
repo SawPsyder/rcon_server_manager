@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { api, PlayerStats, StatsRange } from "../api";
+import { CHART_SYNC_ID, syncChartsByNearestTime } from "../lib/chartSync";
 
 const RANGES: { value: StatsRange; label: string }[] = [
   { value: "24h", label: "24h" },
@@ -101,18 +102,18 @@ function TickTooltip({
             {Number.isNaN(when.getTime()) ? point.t : when.toLocaleString()}
           </span>
         </div>
-        <div className="chart-tooltip-count">
-          {point.tick == null ? (
-            <span className="chart-tooltip-max">no reading</span>
-          ) : (
-            <>
-              <strong>{point.tick.toFixed(1)}</strong>
-              <span className="chart-tooltip-max">
-                /{target} {unit}
-              </span>
-            </>
-          )}
-        </div>
+      </div>
+      <div className="chart-tooltip-count">
+        {point.tick == null ? (
+          <span className="chart-tooltip-max">no reading</span>
+        ) : (
+          <>
+            <strong>{point.tick.toFixed(1)}</strong>
+            <span className="chart-tooltip-max">
+              /{target} {unit}
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
@@ -223,7 +224,12 @@ export default function TickRateChart({
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <LineChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+            <LineChart
+              data={chartData}
+              margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
+              syncId={CHART_SYNC_ID}
+              syncMethod={syncChartsByNearestTime}
+            >
               <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
               <XAxis
                 dataKey="t"
