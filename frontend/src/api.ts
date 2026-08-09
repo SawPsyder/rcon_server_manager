@@ -383,6 +383,20 @@ export type AppSettings = {
   types: Record<string, TypeSettings>;
 };
 
+export type ClientIpHeaderValue = {
+  name: string;
+  present: boolean;
+  value: string | null;
+};
+
+/** Admin helper: IP headers on the current request and how client_ip resolves. */
+export type ClientIpDebug = {
+  configured_header: string;
+  socket_peer: string;
+  resolved_client_ip: string;
+  headers: ClientIpHeaderValue[];
+};
+
 export type StatsRange = "24h" | "7d" | "30d" | "180d" | "1y";
 
 export type PlayerStatPoint = {
@@ -680,10 +694,9 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(data),
       }),
-    test: (to_address: string) =>
+    test: () =>
       request<void>("/api/mail/test", {
         method: "POST",
-        body: JSON.stringify({ to_address }),
       }),
   },
 
@@ -848,6 +861,7 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+  clientIpDebug: () => request<ClientIpDebug>("/api/settings/client-ip"),
   history: (serverId: number) =>
     request<
       { id: number; server_id: number | null; command: string; response: string; created_at: string }[]

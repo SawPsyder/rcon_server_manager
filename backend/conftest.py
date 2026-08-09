@@ -30,6 +30,7 @@ for _optional in (
     "TURNSTILE_SITE_KEY",
     "TURNSTILE_SECRET",
     "PUBLIC_BASE_URL",
-    "TRUSTED_PROXY_IPS",
+    "CLIENT_IP_HEADER",
+    "TRUSTED_PROXY_IPS",  # legacy name; keep cleared so old shells cannot re-enable it
 ):
     os.environ.pop(_optional, None)

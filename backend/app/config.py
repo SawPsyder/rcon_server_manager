@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     smtp_ssl: bool = False  # implicit TLS (port 465); mutually exclusive with starttls
     smtp_from: str = ""
-    smtp_from_name: str = "Sandstorm Server Manager"
+    smtp_from_name: str = "RCON Server Manager"
     smtp_timeout: float = 10.0
 
     # ---- Cloudflare Turnstile (optional) ----
@@ -76,9 +76,12 @@ class Settings(BaseSettings):
     turnstile_secret: str = ""
     turnstile_timeout: float = 8.0
 
-    # Comma-separated proxy addresses whose X-Forwarded-For we trust. Empty means
-    # trust nothing and always use the socket peer - see deps.client_ip.
-    trusted_proxy_ips: str = ""
+    # HTTP header that carries the real client IP when the app sits behind a
+    # reverse proxy (e.g. CF-Connecting-IP for Cloudflare). Empty means no
+    # proxy: use the TCP peer. Only set this when clients cannot reach the app
+    # without the proxy - anyone who can would be able to spoof the header.
+    # See Settings -> Helpers in the UI to inspect which headers arrive.
+    client_ip_header: str = ""
 
     def resolved_steam_api_key(self) -> str:
         return (self.steam_web_api_key or self.steam_api_key or "").strip()
@@ -97,8 +100,8 @@ class Settings(BaseSettings):
         return (self.smtp_from or self.smtp_user or "").strip()
 
     @property
-    def trusted_proxies(self) -> set[str]:
-        return {p.strip() for p in self.trusted_proxy_ips.split(",") if p.strip()}
+    def resolved_client_ip_header(self) -> str:
+        return self.client_ip_header.strip()
 
     def base_url(self) -> str:
         return self.public_base_url.strip().rstrip("/")

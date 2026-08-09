@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import AdminUser
-from app.schemas import MailSettingsOut, MailSettingsUpdate, TestEmailRequest
+from app.schemas import MailSettingsOut, MailSettingsUpdate
 from app.services import mail_settings as mail_config_store
 from app.services import mailer
 
@@ -72,17 +72,17 @@ def update_mail_settings(
 
 @router.post("/test", status_code=status.HTTP_204_NO_CONTENT)
 def send_test_email(
-    body: TestEmailRequest,
-    _admin: AdminUser,
+    admin: AdminUser,
     db: Session = Depends(get_db),
 ) -> Response:
-    """Send a message now and report why it failed, if it did.
+    """Send a message to the signed-in admin and report why it failed, if it did.
 
     Deliberately synchronous: the point of the button is to surface the SMTP
-    error, which a background task would only write to the log.
+    error, which a background task would only write to the log. Always targets
+    the current admin so the UI never needs a free-form recipient field.
     """
     cfg = mail_config_store.load_mail_config(db)
-    problem = mailer.describe_failure(cfg, body.to_address)
+    problem = mailer.describe_failure(cfg, admin.email)
     if problem:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=problem)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

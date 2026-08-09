@@ -669,6 +669,22 @@ tbody tr.selected {
   color: #f0d4a0;
 }
 
+/* TOTP enrolment: high-contrast QR so phone cameras can read it on a dark UI. */
+.totp-qr {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: fit-content;
+}
+
+.totp-qr svg {
+  display: block;
+}
+
 .spinner {
   width: 28px;
   height: 28px;

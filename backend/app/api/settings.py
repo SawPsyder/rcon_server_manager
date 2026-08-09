@@ -1,13 +1,35 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import get_db
-from app.deps import AdminUser
+from app.deps import AdminUser, client_ip
 from app.models import Setting
-from app.schemas import SettingsOut, SettingsUpdate, TypeSettingsOut
+from app.schemas import (
+    ClientIpDebugOut,
+    ClientIpHeaderValue,
+    SettingsOut,
+    SettingsUpdate,
+    TypeSettingsOut,
+)
 from app.server_types import get_adapter, list_adapters, list_server_types
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+# Headers operators commonly use for the real client IP. Always listed in the
+# Helpers UI so absence is as informative as presence. Case-insensitive match
+# against the request; display names keep conventional capitalisation.
+_CLIENT_IP_HEADER_CANDIDATES = (
+    "CF-Connecting-IP",
+    "True-Client-IP",
+    "X-Real-IP",
+    "X-Forwarded-For",
+    "Forwarded",
+    "X-Client-IP",
+    "X-Cluster-Client-IP",
+    "X-Forwarded",
+    "Forwarded-For",
+)
 
 
 def _get(db: Session, key: str, default: str) -> str:
@@ -75,6 +97,55 @@ def update_settings(
                 _set(db, _type_preferred_key(type_id), ts.preferred_gamemode.strip())
     db.commit()
     return get_settings_api(db)
+
+
+@router.get("/client-ip", response_model=ClientIpDebugOut)
+def client_ip_debug(request: Request, _admin: AdminUser) -> ClientIpDebugOut:
+    """Show client-IP headers on this request so operators can pick CLIENT_IP_HEADER.
+
+    Admin-only: the response is about the caller's connection, not secrets, but
+    it is an ops diagnostic rather than something every operator needs.
+    """
+    configured = get_settings().resolved_client_ip_header
+    socket_peer = request.client.host if request.client else ""
+
+    # Preserve candidate order; append a custom configured name if unknown.
+    names: list[str] = list(_CLIENT_IP_HEADER_CANDIDATES)
+    if configured and not any(n.lower() == configured.lower() for n in names):
+        names.append(configured)
+
+    # Surface any other request headers that look IP-related (without dumping
+    # cookies / auth). Starlette header keys are lower-case.
+    seen_lower = {n.lower() for n in names}
+    for key in request.headers.keys():
+        lower = key.lower()
+        if lower in seen_lower:
+            continue
+        if (
+            "forwarded" in lower
+            or lower.endswith("-ip")
+            or lower.endswith("_ip")
+            or "client-ip" in lower
+            or "real-ip" in lower
+            or "connecting-ip" in lower
+        ):
+            names.append(key)
+            seen_lower.add(lower)
+
+    headers: list[ClientIpHeaderValue] = []
+    for name in names:
+        raw = request.headers.get(name)
+        if raw is None:
+            headers.append(ClientIpHeaderValue(name=name, present=False, value=None))
+        else:
+            headers.append(ClientIpHeaderValue(name=name, present=True, value=raw))
+
+    return ClientIpDebugOut(
+        configured_header=configured,
+        socket_peer=socket_peer,
+        resolved_client_ip=client_ip(request),
+        headers=headers,
+    )
 
 
 def resolve_preferred_gamemode(db: Session, server_type: str, server_override: str | None) -> str:

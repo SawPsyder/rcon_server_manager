@@ -55,8 +55,9 @@ services:
       # Cloudflare Turnstile - both must be set or it stays off
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
       TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
-      # Proxy addresses whose X-Forwarded-For may be trusted. Empty = trust none.
-      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
+      # Header with the real client IP when behind a proxy (e.g. CF-Connecting-IP).
+      # Empty = no proxy; use the TCP peer. See Settings -> Helpers.
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
     volumes:
       # Encryption key file and optional local artifacts (SQL lives in Postgres)
       - rcon_manager_data:/data
