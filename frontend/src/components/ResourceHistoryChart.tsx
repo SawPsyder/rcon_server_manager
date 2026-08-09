@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { api, PterodactylHistory, StatsRange } from "../api";
+import { CHART_SYNC_ID, syncChartsByNearestTime } from "../lib/chartSync";
 
 const RANGES: { value: StatsRange; label: string }[] = [
   { value: "24h", label: "24h" },
@@ -301,7 +302,12 @@ export default function ResourceHistoryChart({
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <LineChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+            <LineChart
+              data={chartData}
+              margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
+              syncId={CHART_SYNC_ID}
+              syncMethod={syncChartsByNearestTime}
+            >
               <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
               <XAxis
                 dataKey="t"

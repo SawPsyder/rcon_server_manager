@@ -26,6 +26,7 @@ A self-hosted **web admin dashboard** for managing game servers from one place.
 - TOTP setup QR code and simpler mail test UX
 - Client IP header config with Settings helpers diagnostics
 - Pterodactyl panel integration for container resources and power
+- Cross-chart history hover sync (span-aware across player, tick, and container load)
 <!-- FEATURES:END -->
 
 Game-specific admin tools (player control, map travel, saves, etc.) depend on the server type - see below.

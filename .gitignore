@@ -43,6 +43,7 @@ Thumbs.db
 
 # Build / temp / coverage
 *.log
+.dev-logs/
 .coverage
 htmlcov/
 dist/

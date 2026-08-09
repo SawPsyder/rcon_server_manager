@@ -9,6 +9,7 @@ import {
   YAxis,
 } from "recharts";
 import { api, PlayerStats, StatsRange } from "../api";
+import { CHART_SYNC_ID, syncChartsByNearestTime } from "../lib/chartSync";
 
 const RANGES: { value: StatsRange; label: string }[] = [
   { value: "24h", label: "24h" },
@@ -328,7 +329,12 @@ export default function PlayerStatsChart({
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <AreaChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+            <AreaChart
+              data={chartData}
+              margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
+              syncId={CHART_SYNC_ID}
+              syncMethod={syncChartsByNearestTime}
+            >
               <defs>
                 <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#e8a23a" stopOpacity={0.45} />
