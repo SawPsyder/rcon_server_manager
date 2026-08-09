@@ -359,6 +359,8 @@ export default function PlayerStatsChart({
               <Tooltip
                 content={<ChartTooltip showNameHints={showNameHints} />}
                 cursor={{ stroke: "#e8a23a", strokeWidth: 1, strokeOpacity: 0.45 }}
+                allowEscapeViewBox={{ x: true, y: true }}
+                wrapperStyle={{ zIndex: 20, outline: "none" }}
               />
               <Area
                 type="monotone"

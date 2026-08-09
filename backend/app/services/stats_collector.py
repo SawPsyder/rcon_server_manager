@@ -125,7 +125,12 @@ class StatsCollector:
                         st,
                     )
 
-                # Refresh identity cache (hostname / map / gamemode)
+                # Refresh identity cache (hostname / map / gamemode) and capture
+                # map fields for this sample only from *this* cycle's status
+                # query - never reuse last_map (would tag offline samples stale).
+                map_name: str | None = None
+                gamemode: str | None = None
+                lighting: str | None = None
                 try:
                     raw = adapter.query_status(
                         server.host,
@@ -136,12 +141,15 @@ class StatsCollector:
                         options=options,
                     )
                     if raw.get("online"):
+                        map_name = (str(raw.get("map") or "")).strip() or None
+                        gamemode = (str(raw.get("gamemode") or "")).strip() or None
+                        lighting = (str(raw.get("lighting") or "")).strip() or None
                         update_server_status_cache(
                             server,
                             hostname=raw.get("hostname"),
-                            map_name=raw.get("map"),
-                            lighting=raw.get("lighting"),
-                            gamemode=raw.get("gamemode"),
+                            map_name=map_name,
+                            lighting=lighting,
+                            gamemode=gamemode,
                             coop_or_versus=raw.get("coop_or_versus"),
                             players=int(snap.get("players") or 0),
                             max_players=int(
@@ -175,6 +183,9 @@ class StatsCollector:
                         roster_json=roster_to_json(roster),
                         # Stays NULL for types that report no tick rate at all
                         tick_rate=float(tick) if tick is not None else None,
+                        map_name=map_name,
+                        gamemode=gamemode,
+                        lighting=lighting,
                     )
                 )
 

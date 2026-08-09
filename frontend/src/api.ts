@@ -435,6 +435,32 @@ export type PlayerStats = {
   avg_tick_rate?: number | null;
 };
 
+/** Player-weighted map popularity row (empty samples excluded). */
+export type MapStatRow = {
+  map_name: string;
+  gamemode: string;
+  alias: string | null;
+  player_minutes: number;
+  active_minutes: number;
+  avg_players: number;
+  peak_players: number;
+  active_samples: number;
+  /** Met min active-minutes floor used for default ranking. */
+  qualified: boolean;
+};
+
+export type MapStats = {
+  server_id: number;
+  range: StatsRange;
+  from_time: string;
+  to_time: string;
+  min_active_minutes: number;
+  combine_gamemodes: boolean;
+  /** Earliest map-tagged sample in range; null until capture has data. */
+  data_since: string | null;
+  rows: MapStatRow[];
+};
+
 export type ChartShare = {
   token: string;
   url_path: string;
@@ -619,6 +645,31 @@ export type PterodactylSignal = "start" | "stop" | "restart" | "kill";
 
 export type PterodactylPowerResult = {
   signal: string;
+  detail: string;
+};
+
+export type PterodactylStartupVariable = {
+  env_variable: string;
+  name: string;
+  description: string;
+  server_value: string;
+  default_value: string;
+  is_editable: boolean;
+  rules: string;
+};
+
+export type PterodactylStartup = {
+  variables: PterodactylStartupVariable[];
+  startup_command: string;
+  /** True when the egg exposes both MAP_NAME and SCENARIO. */
+  has_map_defaults: boolean;
+};
+
+export type PterodactylDefaultMapResult = {
+  map_alias: string;
+  map_name: string;
+  scenario: string;
+  gamemode_key: string;
   detail: string;
 };
 
@@ -838,6 +889,27 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ signal, confirm }),
       }),
+    startup: (id: number) =>
+      request<PterodactylStartup>(`/api/servers/${id}/pterodactyl/startup`),
+    updateStartupVariable: (id: number, key: string, value: string) =>
+      request<PterodactylStartupVariable>(
+        `/api/servers/${id}/pterodactyl/startup/variable`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ key, value }),
+        },
+      ),
+    setDefaultMap: (
+      id: number,
+      body: { map_id: number; gamemode_key: string },
+    ) =>
+      request<PterodactylDefaultMapResult>(
+        `/api/servers/${id}/pterodactyl/default-map`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        },
+      ),
   },
 
   serverTypes: () => request<ServerTypeInfo[]>("/api/servers/types"),
@@ -880,6 +952,18 @@ export const api = {
   status: (id: number) => request<ServerStatus>(`/api/servers/${id}/status`),
   playerStats: (id: number, range: StatsRange = "24h") =>
     request<PlayerStats>(`/api/servers/${id}/player-stats?range=${range}`),
+  mapStats: (
+    id: number,
+    range: StatsRange = "7d",
+    opts?: { combineGamemodes?: boolean; minActiveMinutes?: number }
+  ) => {
+    const q = new URLSearchParams({ range });
+    if (opts?.combineGamemodes) q.set("combine_gamemodes", "true");
+    if (opts?.minActiveMinutes != null) {
+      q.set("min_active_minutes", String(opts.minActiveMinutes));
+    }
+    return request<MapStats>(`/api/servers/${id}/map-stats?${q.toString()}`);
+  },
 
   createChartShare: (id: number) =>
     request<ChartShare>(`/api/servers/${id}/chart-share`, { method: "POST" }),

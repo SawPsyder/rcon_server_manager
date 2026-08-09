@@ -2,11 +2,12 @@
 """A fake Pterodactyl panel that speaks the real Client API.
 
 Standing up a real panel just to check this integration is a poor trade, so
-this stands in for one. It implements the four endpoints we use, with the
+this stands in for one. It implements the Client endpoints we use, with the
 response shapes taken from pterodactyl/panel v1.15.0's transformers, and data
 that actually moves - CPU jitters, memory drifts, uptime climbs, network
 counters accumulate - which is what the resource cards and the history chart
-need in order to show anything.
+need in order to show anything. Startup variables (GET/PUT) are included so
+the Sandstorm "Set as default map" path can be exercised locally.
 
     python scripts/fake_pterodactyl_panel.py --port 8099
 
@@ -96,6 +97,34 @@ class FakeServer:
         self._disk_bytes = int(disk_mb * 1024 * 1024 * 0.35) if disk_mb else 2 * 1024**30
         self._cached: tuple[float, dict[str, Any]] | None = None
         self._transition: threading.Timer | None = None
+        # Egg startup vars. Sandstorm-shaped by default so the default-map
+        # button lights up when this container is linked.
+        self.startup_vars: dict[str, dict[str, Any]] = {
+            "MAP_NAME": {
+                "name": "Default Map",
+                "description": "Map / level name passed to the dedicated server.",
+                "default_value": "Ministry",
+                "server_value": "Ministry",
+                "is_editable": True,
+                "rules": "required|string",
+            },
+            "SCENARIO": {
+                "name": "Scenario Name",
+                "description": "Full scenario string (e.g. Scenario_Hold_Checkpoint_Security).",
+                "default_value": "Scenario_Ministry_Checkpoint_Security",
+                "server_value": "Scenario_Ministry_Checkpoint_Security",
+                "is_editable": True,
+                "rules": "required|string",
+            },
+            "SERVER_NAME": {
+                "name": "Server Name",
+                "description": "Unrelated egg variable so the list is not only map keys.",
+                "default_value": "Sandstorm",
+                "server_value": name,
+                "is_editable": True,
+                "rules": "required|string|max:64",
+            },
+        }
 
     # --- state machine ---------------------------------------------------
 
@@ -219,6 +248,62 @@ class FakeServer:
             }
             self._cached = (now, payload)
             return payload
+
+    def startup_payload(self) -> dict[str, Any]:
+        data = []
+        for env_key, meta in self.startup_vars.items():
+            data.append(
+                {
+                    "object": "egg_variable",
+                    "attributes": {
+                        "name": meta["name"],
+                        "description": meta["description"],
+                        "env_variable": env_key,
+                        "default_value": meta["default_value"],
+                        "server_value": meta["server_value"],
+                        "is_editable": meta["is_editable"],
+                        "rules": meta["rules"],
+                    },
+                }
+            )
+        map_name = self.startup_vars.get("MAP_NAME", {}).get("server_value", "Ministry")
+        scenario = self.startup_vars.get("SCENARIO", {}).get(
+            "server_value", "Scenario_Ministry_Checkpoint_Security"
+        )
+        return {
+            "object": "list",
+            "data": data,
+            "meta": {
+                "startup_command": (
+                    f"./InsurgencyServer.sh {map_name}?Scenario={scenario} "
+                    f"-Port=27102 -QueryPort=27131 -log"
+                ),
+                "raw_startup_command": (
+                    "./InsurgencyServer.sh {{MAP_NAME}}?Scenario={{SCENARIO}} "
+                    "-Port=27102 -QueryPort=27131 -log"
+                ),
+            },
+        }
+
+    def set_startup_var(self, key: str, value: str) -> dict[str, Any] | None:
+        meta = self.startup_vars.get(key)
+        if meta is None:
+            return None
+        if not meta.get("is_editable", True):
+            return None
+        meta["server_value"] = value
+        return {
+            "object": "egg_variable",
+            "attributes": {
+                "name": meta["name"],
+                "description": meta["description"],
+                "env_variable": key,
+                "default_value": meta["default_value"],
+                "server_value": meta["server_value"],
+                "is_editable": meta["is_editable"],
+                "rules": meta["rules"],
+            },
+        }
 
 
 def build_servers(rng: random.Random) -> list[FakeServer]:
@@ -409,7 +494,58 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, server.resources())
                 return
 
+            if parts[1] == "startup" and len(parts) == 2:
+                self._send(200, server.startup_payload())
+                return
+
         self._error(404, "NotFoundHttpException", "")
+
+    def do_PUT(self) -> None:  # noqa: N802
+        if self._gate():
+            return
+        path = self.path.split("?", 1)[0].rstrip("/")
+        prefix = f"{CLIENT_PREFIX}/servers/"
+        if not path.startswith(prefix) or not path.endswith("/startup/variable"):
+            self._error(404, "NotFoundHttpException", "")
+            return
+
+        rest = path[len(prefix) : -len("/startup/variable")].rstrip("/")
+        server = self._lookup(rest)
+        if server is None:
+            self._error(404, "NotFoundHttpException", "")
+            return
+
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except ValueError:
+            self._error(400, "BadRequestHttpException", "Malformed JSON body.")
+            return
+
+        key = str(body.get("key") or "").strip()
+        value = body.get("value")
+        if value is None:
+            value = ""
+        else:
+            value = str(value)
+
+        if key not in server.startup_vars:
+            self._error(
+                400,
+                "BadRequestHttpException",
+                "The environment variable you are trying to edit does not exist.",
+            )
+            return
+        if not server.startup_vars[key].get("is_editable", True):
+            self._error(
+                400,
+                "BadRequestHttpException",
+                "The environment variable you are trying to edit is not editable.",
+            )
+            return
+
+        updated = server.set_startup_var(key, value)
+        self._send(200, updated)
 
     def do_POST(self) -> None:  # noqa: N802
         if self._gate():

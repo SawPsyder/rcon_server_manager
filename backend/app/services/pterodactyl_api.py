@@ -6,6 +6,8 @@ needs::
     GET  {panel}/api/client                              list visible servers
     GET  {panel}/api/client/servers/{uuid}               name, status, limits
     GET  {panel}/api/client/servers/{uuid}/resources     live utilisation
+    GET  {panel}/api/client/servers/{uuid}/startup        egg startup variables
+    PUT  {panel}/api/client/servers/{uuid}/startup/variable  update one variable
     POST {panel}/api/client/servers/{uuid}/power         start|stop|restart|kill
     Authorization: Bearer ptlc_...
 
@@ -66,12 +68,18 @@ POLL_INTERVAL_SECONDS = 20.0
 RESOURCE_TTL_SECONDS = 35.0
 # Limits and names change only when a server is reconfigured.
 SERVER_TTL_SECONDS = 300.0
+# Startup vars change when an operator edits them; short enough that the UI
+# sees its own writes, long enough not to re-hit the panel on every render.
+STARTUP_TTL_SECONDS = 90.0
 # Don't re-attempt a rejected key on every poll of every linked server.
 AUTH_COOLDOWN_SECONDS = 30.0
 # Fallback when a 429 arrives without a usable Retry-After.
 DEFAULT_RETRY_AFTER_SECONDS = 20.0
 
 POWER_SIGNALS = ("start", "stop", "restart", "kill")
+
+# Sandstorm egg keys used by "Set as default map". Other eggs simply lack them.
+MAP_DEFAULT_ENV_KEYS = ("MAP_NAME", "SCENARIO")
 
 # The panel returns HTML when the URL points at a web vhost rather than the API.
 _HTML_MARKERS = ("<!doctype", "<html")
@@ -143,6 +151,41 @@ class ServerResources:
     uptime_ms: int = 0
 
 
+@dataclass(frozen=True)
+class StartupVariable:
+    """One egg variable as the panel's Startup tab shows it."""
+
+    env_variable: str
+    name: str = ""
+    description: str = ""
+    server_value: str = ""
+    default_value: str = ""
+    is_editable: bool = True
+    rules: str = ""
+
+
+@dataclass(frozen=True)
+class StartupConfig:
+    """Startup variables for a container, plus the rendered command when present."""
+
+    variables: tuple[StartupVariable, ...] = ()
+    startup_command: str = ""
+
+    def env_keys(self) -> set[str]:
+        return {v.env_variable for v in self.variables if v.env_variable}
+
+    def has_map_defaults(self) -> bool:
+        """True when the egg exposes both keys used by Sandstorm default-map."""
+        keys = self.env_keys()
+        return all(k in keys for k in MAP_DEFAULT_ENV_KEYS)
+
+    def get(self, env_variable: str) -> StartupVariable | None:
+        for var in self.variables:
+            if var.env_variable == env_variable:
+                return var
+        return None
+
+
 def percent_of(value: float, limit: float) -> float | None:
     """Percentage of a limit, or ``None`` when the limit means "unlimited".
 
@@ -206,6 +249,39 @@ def _resources_from_attrs(attrs: Mapping[str, Any]) -> ServerResources:
     )
 
 
+def _variable_from_attrs(attrs: Mapping[str, Any]) -> StartupVariable:
+    return StartupVariable(
+        env_variable=str(attrs.get("env_variable") or "").strip(),
+        name=str(attrs.get("name") or "").strip(),
+        description=str(attrs.get("description") or "").strip(),
+        server_value=str(attrs.get("server_value") if attrs.get("server_value") is not None else ""),
+        default_value=str(
+            attrs.get("default_value") if attrs.get("default_value") is not None else ""
+        ),
+        is_editable=bool(attrs.get("is_editable", True)),
+        rules=str(attrs.get("rules") or "").strip(),
+    )
+
+
+def _startup_from_payload(payload: Any) -> StartupConfig:
+    body = _as_dict(payload)
+    data = body.get("data")
+    variables: list[StartupVariable] = []
+    if isinstance(data, list):
+        for item in data:
+            var = _variable_from_attrs(_attrs(item))
+            if var.env_variable:
+                variables.append(var)
+    meta = _as_dict(body.get("meta"))
+    # The panel may send either key depending on version / transformer.
+    command = str(
+        meta.get("startup_command")
+        or meta.get("raw_startup_command")
+        or ""
+    ).strip()
+    return StartupConfig(variables=tuple(variables), startup_command=command)
+
+
 def _error_detail(payload: Any, fallback: str) -> str:
     """Unwrap ``{"errors":[{code,status,detail}]}`` - ``detail`` is already prose."""
     errors = _as_dict(payload).get("errors")
@@ -245,11 +321,13 @@ class PanelClient:
         auth_cooldown_seconds: float = AUTH_COOLDOWN_SECONDS,
         resource_ttl: float = RESOURCE_TTL_SECONDS,
         server_ttl: float = SERVER_TTL_SECONDS,
+        startup_ttl: float = STARTUP_TTL_SECONDS,
     ) -> None:
         self.config = config
         self.auth_cooldown_seconds = auth_cooldown_seconds
         self.resource_ttl = resource_ttl
         self.server_ttl = server_ttl
+        self.startup_ttl = startup_ttl
 
         self._lock = threading.RLock()
         self._auth_blocked_until = 0.0
@@ -592,7 +670,48 @@ class PanelClient:
             return value
         return self._cached(key, self.resource_ttl, produce)
 
+    def list_startup(self, uuid: str, *, use_cache: bool = True) -> StartupConfig:
+        """Egg startup variables for a server (panel Startup tab).
+
+        Not polled in the background: vars change rarely and only when someone
+        edits them. A short cache still avoids re-fetching on every UI paint.
+        """
+        key = f"startup:{uuid}"
+
+        def produce() -> StartupConfig:
+            return _startup_from_payload(
+                self.request("GET", f"{CLIENT_PATH}/servers/{uuid}/startup")
+            )
+
+        if not use_cache:
+            value = produce()
+            with self._lock:
+                stamp = time.time()
+                self._cache[key] = _CacheEntry(
+                    expires_at=stamp + self.startup_ttl, value=value, stored_at=stamp
+                )
+            return value
+        return self._cached(key, self.startup_ttl, produce)
+
     # --- writes ------------------------------------------------------------
+
+    def update_startup_variable(
+        self, uuid: str, key: str, value: str
+    ) -> StartupVariable:
+        """Update one egg variable. Invalidates the cached startup list."""
+        env_key = (key or "").strip()
+        if not env_key:
+            raise PterodactylApiError("Startup variable key is required.")
+        payload = self.request(
+            "PUT",
+            f"{CLIENT_PATH}/servers/{uuid}/startup/variable",
+            json_body={"key": env_key, "value": value if value is not None else ""},
+        )
+        # Drop the cached list so the next read sees the new value. The
+        # returned object is the updated variable itself.
+        with self._lock:
+            self._cache.pop(f"startup:{uuid}", None)
+        return _variable_from_attrs(_attrs(payload))
 
     def send_power(self, uuid: str, signal: str) -> None:
         """Queue a power signal. Returns once the panel accepts it, not once it lands."""

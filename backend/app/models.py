@@ -211,6 +211,11 @@ class PlayerCountSample(Base):
     # do not expose one (A2S has no equivalent), so the chart shows a gap rather
     # than a misleading zero.
     tick_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Map identity at sample time (A2S Map / rules). NULL when offline or for
+    # samples written before map tagging shipped; not backfilled.
+    map_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    gamemode: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lighting: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     server: Mapped[Server] = relationship(back_populates="player_samples")
 

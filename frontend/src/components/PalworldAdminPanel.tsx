@@ -401,28 +401,35 @@ export default function PalworldAdminPanel({ serverId, onChanged }: Props) {
               </div>
 
               <div className="stack pw-map-section">
-                <div className="row between wrap">
+                <div className="row between wrap" style={{ alignItems: "center", gap: "0.75rem" }}>
                   <h3 style={{ margin: 0, fontSize: "1.05rem" }}>World map</h3>
-                  <label
-                    className="pw-map-filter"
-                    title={
-                      mapSelection?.kind === "player"
-                        ? `Polling every ${WORLD_REFRESH_ACTIVE_MS / 1000}s while a player is selected`
-                        : `Polling every ${WORLD_REFRESH_IDLE_MS / 1000}s (faster when a player is selected)`
-                    }
-                  >
-                    <input
-                      type="checkbox"
-                      checked={autoRefresh}
-                      onChange={(e) => setAutoRefresh(e.target.checked)}
-                    />
-                    Auto-refresh
-                    <span className="muted" style={{ fontSize: "0.8rem" }}>
-                      {mapSelection?.kind === "player"
-                        ? `${WORLD_REFRESH_ACTIVE_MS / 1000}s`
-                        : `${WORLD_REFRESH_IDLE_MS / 1000}s`}
-                    </span>
-                  </label>
+                  <div className="row wrap" style={{ alignItems: "center", gap: "0.6rem" }}>
+                    <label
+                      className="toggle-switch"
+                      title={
+                        mapSelection?.kind === "player"
+                          ? `Polling every ${WORLD_REFRESH_ACTIVE_MS / 1000}s while a player is selected`
+                          : `Polling every ${WORLD_REFRESH_IDLE_MS / 1000}s (faster when a player is selected)`
+                      }
+                    >
+                      <span className="toggle-switch-label">Auto-refresh</span>
+                      <input
+                        type="checkbox"
+                        checked={autoRefresh}
+                        onChange={(e) => setAutoRefresh(e.target.checked)}
+                      />
+                      <span className="toggle-switch-track" aria-hidden>
+                        <span className="toggle-switch-thumb" />
+                      </span>
+                    </label>
+                    {autoRefresh ? (
+                      <span className="chip" style={{ fontSize: "0.8rem" }}>
+                        {mapSelection?.kind === "player"
+                          ? `${WORLD_REFRESH_ACTIVE_MS / 1000}s`
+                          : `${WORLD_REFRESH_IDLE_MS / 1000}s`}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
                 <PalworldWorldMap
                   ref={mapRef}

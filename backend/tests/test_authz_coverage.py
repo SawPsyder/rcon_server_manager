@@ -103,6 +103,10 @@ def test_connection_settings_routes_are_admin_only():
         ("PUT", "/api/pterodactyl"),
         ("POST", "/api/pterodactyl/test"),
         ("GET", "/api/pterodactyl/servers"),
+        # Egg startup vars change configuration that survives restarts.
+        ("GET", "/api/servers/{server_id}/pterodactyl/startup"),
+        ("PUT", "/api/servers/{server_id}/pterodactyl/startup/variable"),
+        ("POST", "/api/servers/{server_id}/pterodactyl/default-map"),
         # These two rotate servers.rcon_password_enc from inside the game panel.
         ("POST", "/api/servers/{server_id}/satisfactory/passwords/admin"),
         ("POST", "/api/servers/{server_id}/satisfactory/claim"),

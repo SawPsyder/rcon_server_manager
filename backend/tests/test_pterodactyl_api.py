@@ -350,6 +350,163 @@ def test_server_object_uses_its_own_longer_cache():
     assert len(seen) == 1
 
 
+# --- startup variables -----------------------------------------------------
+
+
+def startup_payload(
+    *,
+    map_name: str = "Ministry",
+    scenario: str = "Scenario_Ministry_Checkpoint_Security",
+    extra: bool = True,
+):
+    data = [
+        {
+            "object": "egg_variable",
+            "attributes": {
+                "name": "Default Map",
+                "description": "Map name",
+                "env_variable": "MAP_NAME",
+                "default_value": "Ministry",
+                "server_value": map_name,
+                "is_editable": True,
+                "rules": "required|string",
+            },
+        },
+        {
+            "object": "egg_variable",
+            "attributes": {
+                "name": "Scenario Name",
+                "description": "Scenario",
+                "env_variable": "SCENARIO",
+                "default_value": "Scenario_Ministry_Checkpoint_Security",
+                "server_value": scenario,
+                "is_editable": True,
+                "rules": "required|string",
+            },
+        },
+    ]
+    if extra:
+        data.append(
+            {
+                "object": "egg_variable",
+                "attributes": {
+                    "name": "Server Name",
+                    "description": "",
+                    "env_variable": "SERVER_NAME",
+                    "default_value": "Server",
+                    "server_value": "Box",
+                    "is_editable": True,
+                    "rules": "required|string",
+                },
+            }
+        )
+    return {
+        "object": "list",
+        "data": data,
+        "meta": {
+            "startup_command": f"./InsurgencyServer.sh {map_name}?Scenario={scenario}",
+            "raw_startup_command": "./InsurgencyServer.sh {{MAP_NAME}}?Scenario={{SCENARIO}}",
+        },
+    }
+
+
+def test_list_startup_parses_variables_and_meta():
+    handler, seen = recorder(startup_payload())
+    client = make_client(handler)
+    cfg = client.list_startup(UUID)
+    assert len(seen) == 1
+    assert seen[0].method == "GET"
+    assert seen[0].url.path.endswith(f"/servers/{UUID}/startup")
+    assert cfg.has_map_defaults()
+    assert {v.env_variable for v in cfg.variables} == {
+        "MAP_NAME",
+        "SCENARIO",
+        "SERVER_NAME",
+    }
+    assert cfg.get("MAP_NAME").server_value == "Ministry"
+    assert "InsurgencyServer" in cfg.startup_command
+
+
+def test_list_startup_without_map_keys_is_not_map_defaults():
+    payload = {
+        "object": "list",
+        "data": [
+            {
+                "object": "egg_variable",
+                "attributes": {
+                    "name": "Only one",
+                    "env_variable": "MAP_NAME",
+                    "server_value": "Hold",
+                    "default_value": "",
+                    "is_editable": True,
+                    "rules": "",
+                    "description": "",
+                },
+            }
+        ],
+        "meta": {},
+    }
+    handler, _ = recorder(payload)
+    assert not make_client(handler).list_startup(UUID).has_map_defaults()
+
+
+def test_startup_is_cached_then_invalidated_on_update():
+    seen: list[httpx.Request] = []
+    state = {"MAP_NAME": "Ministry", "SCENARIO": "Scenario_Ministry_Checkpoint_Security"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json=startup_payload(
+                    map_name=state["MAP_NAME"], scenario=state["SCENARIO"]
+                ),
+            )
+        body = json.loads(request.content.decode() or "{}")
+        key = body["key"]
+        state[key] = body["value"]
+        return httpx.Response(
+            200,
+            json={
+                "object": "egg_variable",
+                "attributes": {
+                    "name": key,
+                    "description": "",
+                    "env_variable": key,
+                    "default_value": "",
+                    "server_value": body["value"],
+                    "is_editable": True,
+                    "rules": "",
+                },
+            },
+        )
+
+    client = make_client(handler)
+    client.list_startup(UUID)
+    client.list_startup(UUID)
+    assert len([r for r in seen if r.method == "GET"]) == 1
+
+    updated = client.update_startup_variable(UUID, "MAP_NAME", "Hold")
+    assert updated.server_value == "Hold"
+    put = [r for r in seen if r.method == "PUT"]
+    assert len(put) == 1
+    assert put[0].url.path.endswith("/startup/variable")
+    assert json.loads(put[0].content) == {"key": "MAP_NAME", "value": "Hold"}
+
+    # Cache was dropped; next list sees the new value.
+    cfg = client.list_startup(UUID)
+    assert len([r for r in seen if r.method == "GET"]) == 2
+    assert cfg.get("MAP_NAME").server_value == "Hold"
+
+
+def test_update_startup_rejects_empty_key():
+    handler, seen = recorder(status=200, payload={})
+    with pytest.raises(PterodactylApiError):
+        make_client(handler).update_startup_variable(UUID, "  ", "x")
+    assert seen == []
+
+
 # --- describe_failure ------------------------------------------------------
 
 

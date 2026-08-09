@@ -315,6 +315,50 @@ class PterodactylPowerOut(BaseModel):
     detail: str = ""
 
 
+class PterodactylStartupVariableOut(BaseModel):
+    """One egg startup variable from the panel."""
+
+    env_variable: str
+    name: str = ""
+    description: str = ""
+    server_value: str = ""
+    default_value: str = ""
+    is_editable: bool = True
+    rules: str = ""
+
+
+class PterodactylStartupOut(BaseModel):
+    """Startup variables for a linked container.
+
+    ``has_map_defaults`` is True when the egg exposes both ``MAP_NAME`` and
+    ``SCENARIO`` - the two keys the Sandstorm "Set as default map" button needs.
+    """
+
+    variables: list[PterodactylStartupVariableOut] = Field(default_factory=list)
+    startup_command: str = ""
+    has_map_defaults: bool = False
+
+
+class PterodactylStartupVariableUpdate(BaseModel):
+    key: str = Field(min_length=1, max_length=128)
+    value: str = Field(default="", max_length=2048)
+
+
+class PterodactylDefaultMapRequest(BaseModel):
+    """Set panel MAP_NAME + SCENARIO from a catalog map + gamemode."""
+
+    map_id: int
+    gamemode_key: str = Field(min_length=1, max_length=64)
+
+
+class PterodactylDefaultMapOut(BaseModel):
+    map_alias: str = ""
+    map_name: str = ""
+    scenario: str = ""
+    gamemode_key: str = ""
+    detail: str = ""
+
+
 class ServerFeaturesOut(BaseModel):
     map_travel: bool = False
     structured_player_list: bool = False

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import {
   api,
+  ApiError,
   AppSettings,
   BanEntry,
   identityKey,
@@ -12,9 +13,11 @@ import {
   ServerStatus,
   ServerTypeInfo,
 } from "../api";
+import { useAuth } from "../auth";
 import BanListPanel from "../components/BanListPanel";
 import IdentityDossierModal from "../components/IdentityDossierModal";
 import IdentityInfoButton from "../components/IdentityInfoButton";
+import MapPopularityPanel from "../components/MapPopularityPanel";
 import PlayerStatsChart from "../components/PlayerStatsChart";
 import TickRateChart from "../components/TickRateChart";
 import PalworldAdminPanel from "../components/PalworldAdminPanel";
@@ -93,6 +96,7 @@ function statusFromServerCache(server: Server): ServerStatus {
 export default function ServerDetailPage() {
   const { serverId: serverIdParam } = useParams<{ serverId: string }>();
   const location = useLocation();
+  const { isAdmin } = useAuth();
   const serverId = Number(serverIdParam);
   const validServerId = Number.isFinite(serverId) && serverId > 0 ? serverId : null;
   const backSearch = overviewBackSearch(location.state);
@@ -131,6 +135,10 @@ export default function ServerDetailPage() {
   const [gamemode, setGamemode] = useState("");
   const [lighting, setLighting] = useState("Day");
   const [travelPreview, setTravelPreview] = useState("");
+  /** Admin-only: egg exposes MAP_NAME + SCENARIO on the linked panel container. */
+  const [canSetDefaultMap, setCanSetDefaultMap] = useState(false);
+  const [defaultMapBusy, setDefaultMapBusy] = useState(false);
+  const [defaultMapMessage, setDefaultMapMessage] = useState("");
 
   const selectedServer = useMemo(
     () => (validServerId ? servers.find((s) => s.id === validServerId) || null : null),
@@ -251,6 +259,21 @@ export default function ServerDetailPage() {
     }
   }, []);
 
+  const refreshStartupEligibility = useCallback(async (server: Server | null) => {
+    setDefaultMapMessage("");
+    if (!server?.pterodactyl_linked || !isAdmin) {
+      setCanSetDefaultMap(false);
+      return;
+    }
+    try {
+      const startup = await api.serverPterodactyl.startup(server.id);
+      setCanSetDefaultMap(Boolean(startup.has_map_defaults));
+    } catch {
+      // Panel misconfigured, 403, or egg without startup — hide the button.
+      setCanSetDefaultMap(false);
+    }
+  }, [isAdmin]);
+
   const refreshStatus = useCallback(async () => {
     if (!validServerId) return;
     try {
@@ -308,9 +331,10 @@ export default function ServerDetailPage() {
     setStatus(statusFromServerCache(selectedServer));
     loadServerExtras(selectedServer);
     refreshStatus();
+    refreshStartupEligibility(selectedServer);
     // Only re-seed when the selected server id changes - not when cache fields update after poll
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: avoid loop with setServers in refreshStatus
-  }, [validServerId, selectedServer?.id, refreshStatus, loadServerExtras]);
+  }, [validServerId, selectedServer?.id, refreshStatus, loadServerExtras, refreshStartupEligibility]);
 
   useEffect(() => {
     if (!validServerId || !settings) return;
@@ -850,7 +874,10 @@ export default function ServerDetailPage() {
             {travelPreview && (
               <div className="full code-block">{travelPreview}</div>
             )}
-            <div className="full">
+            {/* Two independent actions share the same selection (map/gamemode),
+                not the same request: travel is live RCON; default map only
+                writes Pterodactyl MAP_NAME + SCENARIO for the next boot. */}
+            <div className="full row wrap" style={{ gap: "0.5rem" }}>
               <button
                 className="btn primary"
                 disabled={!validServerId || !mapId || !gamemode || busy}
@@ -873,10 +900,57 @@ export default function ServerDetailPage() {
               >
                 Change map
               </button>
+              {canSetDefaultMap && isAdmin ? (
+                <button
+                  className="btn"
+                  disabled={
+                    !validServerId || !mapId || !gamemode || defaultMapBusy
+                  }
+                  title="Independent of Change map: writes MAP_NAME and SCENARIO on the Pterodactyl egg only. Takes effect on next start/restart."
+                  onClick={() => {
+                    if (!validServerId || !mapId || !gamemode) return;
+                    setDefaultMapBusy(true);
+                    setDefaultMapMessage("");
+                    api.serverPterodactyl
+                      .setDefaultMap(validServerId, {
+                        map_id: Number(mapId),
+                        gamemode_key: gamemode,
+                      })
+                      .then((r) => {
+                        setDefaultMapMessage(r.detail || "Default map updated.");
+                        if (selectedServer) {
+                          refreshStartupEligibility(selectedServer);
+                        }
+                      })
+                      .catch((e) => {
+                        const msg =
+                          e instanceof ApiError
+                            ? e.message
+                            : e instanceof Error
+                              ? e.message
+                              : String(e);
+                        setDefaultMapMessage(msg);
+                      })
+                      .finally(() => setDefaultMapBusy(false));
+                  }}
+                >
+                  {defaultMapBusy ? "Setting default…" : "Set as default map"}
+                </button>
+              ) : null}
             </div>
+            {defaultMapMessage ? (
+              <div className="full muted" style={{ marginTop: "0.35rem" }}>
+                {defaultMapMessage}
+              </div>
+            ) : null}
           </div>
         </section>
       )}
+
+      {/* Map popularity needs A2S map identity on samples (Sandstorm). */}
+      {features.a2s_query && validServerId ? (
+        <MapPopularityPanel serverId={validServerId} />
+      ) : null}
 
       {AdminPanel && validServerId && (
         <AdminPanel serverId={validServerId} onChanged={refreshStatus} />

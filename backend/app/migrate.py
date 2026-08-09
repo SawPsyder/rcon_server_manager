@@ -235,6 +235,11 @@ def run_migrations(engine: Engine) -> None:
             _add_column(engine, "player_count_samples", "tick_rate DOUBLE PRECISION")
         else:
             _add_column(engine, "player_count_samples", "tick_rate REAL")
+        # Map identity for popularity. Existing rows stay NULL on purpose -
+        # we never recorded map at sample time and inventing it would lie.
+        _add_column(engine, "player_count_samples", "map_name VARCHAR(128)")
+        _add_column(engine, "player_count_samples", "gamemode VARCHAR(128)")
+        _add_column(engine, "player_count_samples", "lighting VARCHAR(64)")
 
     # End of the previous session, so the player table can show "last visit"
     # while someone is online. Left NULL for existing rows on purpose - we never
