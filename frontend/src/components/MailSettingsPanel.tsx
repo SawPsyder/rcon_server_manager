@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api, type MailSettings } from "../api";
+import { useAuth } from "../auth";
 
 const BLANK: MailSettings = {
   host: "",
@@ -9,19 +10,19 @@ const BLANK: MailSettings = {
   starttls: true,
   ssl: false,
   from_address: "",
-  from_name: "Sandstorm Server Manager",
+  from_name: "RCON Server Manager",
   base_url: "",
   enabled: false,
   configured: false,
 };
 
 export default function MailSettingsPanel({ onSaved }: { onSaved?: () => void }) {
+  const { user } = useAuth();
   const [form, setForm] = useState<MailSettings>(BLANK);
   const [loaded, setLoaded] = useState(false);
   /** Left blank to keep the stored password; the server never sends it back. */
   const [password, setPassword] = useState("");
   const [clearPassword, setClearPassword] = useState(false);
-  const [testTo, setTestTo] = useState("");
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [msg, setMsg] = useState("");
@@ -80,8 +81,9 @@ export default function MailSettingsPanel({ onSaved }: { onSaved?: () => void })
     setMsg("");
     setError("");
     try {
-      await api.mail.test(testTo);
-      setMsg(`Test email sent to ${testTo}. Check the inbox, and the spam folder.`);
+      await api.mail.test();
+      const dest = user?.email ? ` to ${user.email}` : "";
+      setMsg(`Test email sent${dest}. Check the inbox, and the spam folder.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send the test email");
     } finally {
@@ -232,37 +234,27 @@ export default function MailSettingsPanel({ onSaved }: { onSaved?: () => void })
             </select>
           </label>
 
-          <div className="full">
+          <div className="full row wrap">
             <button className="btn primary" disabled={busy}>
               {busy ? "Saving…" : "Save mail settings"}
             </button>
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={testing || busy || !form.host}
+              title={
+                !form.host
+                  ? "Configure an SMTP host first"
+                  : user?.email
+                    ? `Sends a test message to ${user.email} using the saved settings (save changes first)`
+                    : "Sends a test message to your account email using the saved settings (save changes first)"
+              }
+              onClick={() => void sendTest()}
+            >
+              {testing ? "Sending…" : "Send test email"}
+            </button>
           </div>
         </form>
-      </section>
-
-      <section className="card">
-        <h2>Send a test email</h2>
-        <p className="muted">
-          Delivers a message right now using the saved settings and reports the exact
-          error if the relay refuses it. Save your changes first.
-        </p>
-        <div className="row wrap">
-          <input
-            className="grow"
-            type="email"
-            placeholder="you@example.org"
-            value={testTo}
-            onChange={(e) => setTestTo(e.target.value)}
-          />
-          <button
-            className="btn ghost"
-            disabled={testing || !testTo || !form.host}
-            title={form.host ? undefined : "Configure an SMTP host first"}
-            onClick={sendTest}
-          >
-            {testing ? "Sending…" : "Send test email"}
-          </button>
-        </div>
       </section>
     </div>
   );

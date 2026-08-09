@@ -19,7 +19,7 @@ from app.security import decrypt_secret, encrypt_secret, hash_password, verify_p
 
 logger = logging.getLogger(__name__)
 
-ISSUER = "Sandstorm Server Manager"
+ISSUER = "RCON Server Manager"
 # One step either side of now: tolerates ~30s of clock drift between the
 # server and the user's phone without widening the guess window meaningfully.
 VALID_WINDOW = 1
@@ -34,9 +34,8 @@ def generate_secret() -> str:
 def provisioning_uri(secret: str, email: str) -> str:
     """otpauth:// URI for an authenticator app.
 
-    Rendered as text (and as a copyable base32 secret) rather than a QR image -
-    every authenticator accepts manual entry, and a QR library would be a
-    dependency added for cosmetics.
+    The frontend renders this as a scannable QR code and also shows the base32
+    secret and raw URI for manual entry.
     """
     return (
         f"otpauth://totp/{quote(ISSUER)}:{quote(email)}"

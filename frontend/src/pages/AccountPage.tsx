@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 
@@ -214,10 +215,19 @@ export default function AccountPage() {
         ) : enrolment ? (
           <div className="stack">
             <p className="muted">
-              Add this key to your authenticator app, then enter the code it
-              shows. Most apps accept the setup URL directly; otherwise type the
-              key in manually.
+              Scan the QR code with your authenticator app, then enter the code
+              it shows. If you cannot scan, use the setup key or URL below.
             </p>
+            <div className="totp-qr" aria-label="Authenticator setup QR code">
+              <QRCodeSVG
+                value={enrolment.uri}
+                size={192}
+                level="M"
+                includeMargin
+                bgColor="#ffffff"
+                fgColor="#0a0e14"
+              />
+            </div>
             <label>
               Setup key
               <div className="code-block">{enrolment.secret}</div>

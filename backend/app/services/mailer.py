@@ -88,7 +88,7 @@ def describe_failure(cfg: MailConfig, to_address: str) -> str:
         return "No from-address is configured."
 
     message = EmailMessage()
-    message["Subject"] = "Sandstorm Server Manager test email"
+    message["Subject"] = "RCON Server Manager test email"
     message["From"] = formataddr((cfg.from_name, cfg.resolved_from))
     message["To"] = to_address
     message.set_content(
@@ -165,23 +165,23 @@ def send_invite(
     cfg: MailConfig, to_address: str, link: str, inviter: str, ttl_hours: int
 ) -> bool:
     text = (
-        f"{inviter} invited you to Sandstorm Server Manager.\n\n"
+        f"{inviter} invited you to RCON Server Manager.\n\n"
         f"Set your password here (link expires in {ttl_hours} hours):\n{link}\n\n"
         "If you were not expecting this invitation you can ignore this message.\n"
     )
     html = _wrap_html(
         "You have been invited",
-        f"{inviter} invited you to Sandstorm Server Manager. "
+        f"{inviter} invited you to RCON Server Manager. "
         f"This link expires in {ttl_hours} hours.",
         link,
         "Set your password",
     )
-    return send_mail(cfg, to_address, "Your Sandstorm Server Manager invitation", text, html)
+    return send_mail(cfg, to_address, "Your RCON Server Manager invitation", text, html)
 
 
 def send_password_reset(cfg: MailConfig, to_address: str, link: str, ttl_minutes: int) -> bool:
     text = (
-        "Someone requested a password reset for your Sandstorm Server Manager "
+        "Someone requested a password reset for your RCON Server Manager "
         f"account.\n\nReset it here (link expires in {ttl_minutes} minutes):\n{link}\n\n"
         "If this was not you, no action is needed - your password has not changed.\n"
     )
@@ -193,4 +193,4 @@ def send_password_reset(cfg: MailConfig, to_address: str, link: str, ttl_minutes
         link,
         "Reset password",
     )
-    return send_mail(cfg, to_address, "Reset your Sandstorm Server Manager password", text, html)
+    return send_mail(cfg, to_address, "Reset your RCON Server Manager password", text, html)

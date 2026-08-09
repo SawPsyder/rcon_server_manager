@@ -51,7 +51,7 @@ class MailConfig:
     starttls: bool = True
     ssl: bool = False
     from_address: str = ""
-    from_name: str = "Sandstorm Server Manager"
+    from_name: str = "RCON Server Manager"
     base_url: str = ""
     timeout: float = 10.0
 
@@ -175,7 +175,7 @@ def load_mail_config(db: Session) -> MailConfig:
         starttls=_as_bool(_get(db, KEY_STARTTLS), True),
         ssl=_as_bool(_get(db, KEY_SSL), False),
         from_address=(_get(db, KEY_FROM) or "").strip(),
-        from_name=(_get(db, KEY_FROM_NAME) or "Sandstorm Server Manager").strip(),
+        from_name=(_get(db, KEY_FROM_NAME) or "RCON Server Manager").strip(),
         base_url=(_get(db, KEY_BASE_URL) or "").strip(),
         timeout=env.smtp_timeout,
     )
