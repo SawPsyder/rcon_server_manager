@@ -57,7 +57,8 @@ export type Server = {
   name: string;
   host: string;
   query_port: number;
-  rcon_port: number;
+  /** Null for non-admin viewers - the backend redacts the control plane. */
+  rcon_port: number | null;
   server_type: string;
   preferred_gamemode?: string | null;
   has_rcon_password: boolean;
@@ -317,6 +318,8 @@ export type PlayerNote = {
   platform: string;
   external_id: string;
   body: string;
+  author_user_id?: number | null;
+  author_label?: string;
   created_at: string;
   updated_at: string;
 };
@@ -432,6 +435,102 @@ export type PublicMapMeta = {
   server_type: string;
 };
 
+export type CurrentUser = {
+  id: number;
+  email: string;
+  display_name: string;
+  role: "admin" | "user";
+  is_admin: boolean;
+  totp_enabled: boolean;
+  /** Servers this user may operate. Empty with is_admin means "all". */
+  server_ids: number[];
+};
+
+export type AuthStatus = {
+  authenticated: boolean;
+  user: CurrentUser | null;
+  mfa_required?: boolean;
+};
+
+export type PublicConfig = {
+  turnstile_enabled: boolean;
+  turnstile_site_key: string;
+  smtp_enabled: boolean;
+  bootstrap_available: boolean;
+};
+
+export type ManagedUser = {
+  id: number;
+  email: string;
+  display_name: string;
+  role: "admin" | "user";
+  is_active: boolean;
+  totp_enabled: boolean;
+  has_password: boolean;
+  /** Temporary lock after failed sign-ins (not the same as disabled). */
+  is_locked: boolean;
+  locked_until: string | null;
+  failed_logins: number;
+  server_ids: number[];
+  last_login_at: string | null;
+  created_at: string;
+};
+
+export type InviteResult = {
+  user: ManagedUser;
+  invite_url: string;
+  emailed: boolean;
+};
+
+export type MailSettings = {
+  host: string;
+  port: number;
+  user: string;
+  /** The password itself is never sent to the client. */
+  has_password: boolean;
+  starttls: boolean;
+  ssl: boolean;
+  from_address: string;
+  from_name: string;
+  base_url: string;
+  /** Whether a message could actually be sent right now. */
+  enabled: boolean;
+  /** False while the settings still come from environment variables. */
+  configured: boolean;
+};
+
+export type MailSettingsUpdate = {
+  host: string;
+  port: number;
+  user: string;
+  /** Omit to keep the stored password; "" clears it. */
+  password?: string;
+  starttls: boolean;
+  ssl: boolean;
+  from_address: string;
+  from_name: string;
+  base_url: string;
+};
+
+/** Carries the HTTP status so callers can branch; extends Error so every
+ *  existing `err instanceof Error ? err.message : …` handler still works. */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+let onUnauthorized: (() => void) | null = null;
+
+/** Registered by AuthProvider so an expired session drops straight to /login
+ *  instead of rendering "Not authenticated" inside whatever page was open. */
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  onUnauthorized = fn;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
@@ -449,7 +548,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    // Not for /api/auth/* - a wrong password there is a 401 too, and firing
+    // the session-expired handler would bounce the user mid-login.
+    if (res.status === 401 && !path.startsWith("/api/auth/")) onUnauthorized?.();
+    throw new ApiError(
+      res.status,
+      typeof detail === "string" ? detail : JSON.stringify(detail),
+    );
   }
   if (res.status === 204) {
     return undefined as T;
@@ -458,19 +563,129 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  authStatus: () => request<{ authenticated: boolean }>("/api/auth/status"),
-  login: (password: string) =>
-    request<{ authenticated: boolean }>("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ password }),
+  authConfig: () => request<PublicConfig>("/api/auth/config"),
+  authStatus: () => request<AuthStatus>("/api/auth/status"),
+  me: () => request<AuthStatus>("/api/auth/me"),
+  updateMe: (display_name: string) =>
+    request<AuthStatus>("/api/auth/me", {
+      method: "PATCH",
+      body: JSON.stringify({ display_name }),
     }),
-  logout: () =>
-    request<{ authenticated: boolean }>("/api/auth/logout", { method: "POST" }),
+  bootstrapStatus: () => request<{ available: boolean }>("/api/auth/bootstrap"),
+  bootstrapClaim: (data: {
+    email: string;
+    password: string;
+    display_name: string;
+    admin_password: string;
+    turnstile_token: string;
+  }) =>
+    request<AuthStatus>("/api/auth/bootstrap-claim", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  login: (email: string, password: string, turnstile_token: string) =>
+    request<AuthStatus>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password, turnstile_token }),
+    }),
+  loginTotp: (code: string) =>
+    request<AuthStatus>("/api/auth/login/totp", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+  logout: () => request<AuthStatus>("/api/auth/logout", { method: "POST" }),
+  logoutEverywhere: () =>
+    request<AuthStatus>("/api/auth/logout-everywhere", { method: "POST" }),
   changePassword: (current_password: string, new_password: string) =>
-    request<{ authenticated: boolean }>("/api/auth/change-password", {
+    request<AuthStatus>("/api/auth/change-password", {
       method: "POST",
       body: JSON.stringify({ current_password, new_password }),
     }),
+  forgotPassword: (email: string, turnstile_token: string) =>
+    request<void>("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email, turnstile_token }),
+    }),
+  resetPassword: (token: string, password: string) =>
+    request<{ ok: boolean }>("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    }),
+  checkResetToken: (token: string) =>
+    request<{ valid: boolean }>(
+      `/api/auth/reset-token/${encodeURIComponent(token)}`,
+    ),
+  deleteIdentityNote: (noteId: number) =>
+    request<void>(`/api/identities/notes/${noteId}`, { method: "DELETE" }),
+
+  totp: {
+    setup: (current_password: string) =>
+      request<{ secret: string; otpauth_uri: string }>("/api/auth/totp/setup", {
+        method: "POST",
+        body: JSON.stringify({ current_password }),
+      }),
+    confirm: (code: string) =>
+      request<{ recovery_codes: string[] }>("/api/auth/totp/confirm", {
+        method: "POST",
+        body: JSON.stringify({ code }),
+      }),
+    disable: (current_password: string) =>
+      request<AuthStatus>("/api/auth/totp/disable", {
+        method: "POST",
+        body: JSON.stringify({ current_password }),
+      }),
+  },
+
+  users: {
+    list: () => request<ManagedUser[]>("/api/users"),
+    create: (data: {
+      email: string;
+      display_name: string;
+      role: string;
+      server_ids: number[];
+    }) =>
+      request<InviteResult>("/api/users", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (
+      id: number,
+      data: Partial<{ display_name: string; role: string; is_active: boolean }>,
+    ) =>
+      request<ManagedUser>(`/api/users/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) =>
+      request<void>(`/api/users/${id}`, { method: "DELETE" }),
+    setGrants: (id: number, server_ids: number[]) =>
+      request<ManagedUser>(`/api/users/${id}/grants`, {
+        method: "PUT",
+        body: JSON.stringify({ server_ids }),
+      }),
+    resetPassword: (id: number) =>
+      request<InviteResult>(`/api/users/${id}/reset-password`, { method: "POST" }),
+    clearTotp: (id: number) =>
+      request<ManagedUser>(`/api/users/${id}/totp`, { method: "DELETE" }),
+    forceLogout: (id: number) =>
+      request<ManagedUser>(`/api/users/${id}/logout-everywhere`, { method: "POST" }),
+    unlock: (id: number) =>
+      request<ManagedUser>(`/api/users/${id}/unlock`, { method: "POST" }),
+  },
+
+  mail: {
+    get: () => request<MailSettings>("/api/mail"),
+    update: (data: MailSettingsUpdate) =>
+      request<MailSettings>("/api/mail", {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    test: (to_address: string) =>
+      request<void>("/api/mail/test", {
+        method: "POST",
+        body: JSON.stringify({ to_address }),
+      }),
+  },
 
   serverTypes: () => request<ServerTypeInfo[]>("/api/servers/types"),
   listServers: () => request<Server[]>("/api/servers"),
@@ -588,7 +803,7 @@ export const api = {
     request<IdentityDossier>(
       `/api/identities/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}`
     ),
-  /** Upsert the single admin note document (empty body clears). */
+  /** Upsert the caller's own note (empty body deletes only their note). */
   setIdentityNote: (platform: string, externalId: string, body: string) =>
     request<PlayerNote | null>(
       `/api/identities/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}/notes`,

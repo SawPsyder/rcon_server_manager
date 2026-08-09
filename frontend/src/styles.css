@@ -124,6 +124,50 @@ code {
 
 .login-card {
   width: min(400px, 100%);
+  /* Block layout only held up while the form was a single field and a single
+     button: buttons are inline-block, so two in a row sat side by side at
+     their own widths, and stacked labels (which carry no margin) ran flush
+     into each other. */
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.login-card h1,
+.login-card > p {
+  margin: 0;
+}
+
+/* Full width so the primary action lines up with the fields above it. */
+.login-card > .btn {
+  width: 100%;
+}
+
+/* Secondary actions - forgot password, go back - as a separated footer. */
+.login-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.15rem 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+
+/* Read as links, not buttons: bordered pills of differing widths look ragged
+   once they wrap, and they compete with the primary action right above them. */
+.login-actions .btn {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.2rem 0.1rem;
+  font-weight: 500;
+}
+
+.login-actions .btn:hover:not(:disabled) {
+  border-color: transparent;
+  color: var(--accent);
+  filter: none;
+  text-decoration: underline;
 }
 
 .card {
@@ -134,7 +178,8 @@ code {
   box-shadow: var(--shadow);
 }
 
-.login-card h1,
+/* .login-card h1 is handled above - the card is a flex column, so its gap
+   provides the spacing and a bottom margin here would stack on top of it. */
 .card h2 {
   margin: 0 0 0.35rem;
 }
@@ -391,10 +436,53 @@ textarea:focus {
 
 .note-editor {
   width: 100%;
-  min-height: 10rem;
+  min-height: 7.5rem;
   resize: vertical;
   font-family: inherit;
   line-height: 1.45;
+}
+
+.note-own {
+  padding: 0.75rem 0.85rem;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.note-author-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.note-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.note-card {
+  padding: 0.65rem 0.75rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.note-card-head {
+  margin-bottom: 0.35rem;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.note-card-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--text);
 }
 
 .history-lines {
@@ -1745,4 +1833,222 @@ tr.pw-row-selected {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+/* ---- Users / account ---- */
+
+/* A .chip that wraps a checkbox is a control, not a label. */
+label.chip {
+  display: inline-flex;
+  /* The global `label` rule sets flex-direction: column. Without resetting it
+     the checkbox stacks above its own text instead of sitting beside it. */
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  color: var(--text);
+}
+
+label.chip input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+label.chip:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Turnstile renders a fixed-size iframe; keep it from stretching the form. */
+.cf-turnstile {
+  display: flex;
+  justify-content: center;
+  margin: 0.25rem 0;
+  min-height: 65px;
+}
+
+/* Recovery codes are read and transcribed, so give them room to breathe. */
+.login-card .code-block,
+.card .code-block {
+  user-select: all;
+}
+
+/* A third state alongside online/offline: invited, but no password set yet,
+   so the account exists and cannot sign in. */
+.pill.pending {
+  background: rgba(232, 162, 58, 0.14);
+  border-color: rgba(232, 162, 58, 0.4);
+  color: var(--accent);
+}
+
+/* Temporary lock after failed sign-ins (distinct from permanently Disabled). */
+.pill.locked {
+  background: rgba(240, 113, 120, 0.14);
+  border-color: rgba(240, 113, 120, 0.45);
+  color: #f5a0a6;
+}
+
+.chip.role-admin {
+  background: rgba(232, 162, 58, 0.14);
+  border-color: rgba(232, 162, 58, 0.4);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.invite-form {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.users-table .user-cell {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.users-table .user-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.users-table .user-email {
+  font-size: 0.82rem;
+}
+
+/* Keep the action column tight against the right edge and off the flex path -
+   a table cell set to display:flex leaves the table layout and the column
+   stops aligning with its header. */
+.users-table .col-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+/* A label + control pair that cannot be a <label> wrapper, because it holds a
+   second labelled control of its own. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field > label {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+/* Separate a settings form from the heading and description above it. */
+.settings-form {
+  margin-top: 1rem;
+}
+
+.modal-save-bar {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- Server access picker ---- */
+
+.access-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.access-picker.is-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.access-picker-head {
+  font-size: 0.85rem;
+}
+
+.access-picker-search {
+  width: 100%;
+}
+
+.access-picker-list {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0f141c;
+  overflow-y: auto;
+  /* Roughly six rows, then scroll - so the picker cannot push the modal's
+     save bar off screen on an install with many servers. */
+  max-height: 15rem;
+}
+
+.access-picker-empty {
+  margin: 0;
+  padding: 0.8rem;
+}
+
+.access-row {
+  /* Overrides the global label rule, same reason as label.chip. */
+  flex-direction: row;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.access-row:last-child {
+  border-bottom: 0;
+}
+
+.access-row:hover {
+  background: var(--bg-elev-2);
+}
+
+.access-row.is-checked {
+  background: rgba(232, 162, 58, 0.08);
+}
+
+.access-row input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.access-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.access-row-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-row-meta {
+  font-size: 0.8rem;
+}
+
+/* Sections inside the per-user modal, separated so the destructive block is
+   visually distinct from the everyday controls above it. */
+.user-modal-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.user-modal-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+}
+
+.user-modal-section.danger-zone {
+  border-top-color: rgba(240, 113, 120, 0.35);
+}
+
+.user-modal-section.danger-zone h3 {
+  color: #ffb4b8;
 }

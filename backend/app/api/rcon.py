@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from app.api.servers import get_rcon_password, get_server_or_404
 from app.config import get_settings
 from app.database import get_db
-from app.deps import require_admin
-from app.models import CommandHistory, MapConfig
+from app.deps import CurrentUser
+from app.models import CommandHistory, MapConfig, User
 from app.schemas import (
     AdminSayRequest,
     BanEntryOut,
@@ -53,7 +53,7 @@ def _require_feature(server, feature: str):
     return adapter
 
 
-def _exec(db: Session, server_id: int, command: str) -> RconCommandResponse:
+def _exec(db: Session, server_id: int, command: str, actor: User | None = None) -> RconCommandResponse:
     settings = get_settings()
     server = get_server_or_404(db, server_id)
     password = get_rcon_password(server)
@@ -80,6 +80,7 @@ def _exec(db: Session, server_id: int, command: str) -> RconCommandResponse:
                 server_id=server.id,
                 command=command,
                 response=(response or "")[:4000],
+                actor_user_id=actor.id if actor else None,
             )
         )
         db.commit()
@@ -98,6 +99,7 @@ def _log_moderation(
     net_id: str = "",
     reason: str = "",
     detail: str = "",
+    actor: User | None = None,
 ) -> None:
     try:
         log_player_action(
@@ -110,6 +112,7 @@ def _log_moderation(
             detail=detail,
             ok=result.ok,
             error=result.error or "",
+            actor=actor,
         )
         db.commit()
     except Exception:
@@ -120,30 +123,30 @@ def _log_moderation(
 def rcon_command(
     server_id: int,
     body: RconCommandRequest,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
-    return _exec(db, server_id, body.command.strip())
+    return _exec(db, server_id, body.command.strip(), user)
 
 
 @router.post("/api/servers/{server_id}/say", response_model=RconCommandResponse)
 def admin_say(
     server_id: int,
     body: AdminSayRequest,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
     adapter = _require_feature(server, "admin_say")
-    return _exec(db, server_id, adapter.build_say_command(body.message.strip()))
+    return _exec(db, server_id, adapter.build_say_command(body.message.strip()), user)
 
 
 @router.post("/api/servers/{server_id}/players/kick", response_model=RconCommandResponse)
 def kick_player(
     server_id: int,
     body: PlayerActionRequest,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
     adapter = _require_feature(server, "kick_ban")
@@ -151,7 +154,7 @@ def kick_player(
     cmd = adapter.build_kick_command(
         player_name=body.player_name, net_id=body.net_id, reason=reason
     )
-    result = _exec(db, server_id, cmd)
+    result = _exec(db, server_id, cmd, user)
     _log_moderation(
         db,
         server,
@@ -160,6 +163,7 @@ def kick_player(
         player_name=body.player_name,
         net_id=body.net_id,
         reason=reason,
+        actor=user,
     )
     return result
 
@@ -168,8 +172,8 @@ def kick_player(
 def ban_player(
     server_id: int,
     body: PlayerActionRequest,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
     # Games without timed bans (e.g. Palworld) only expose permanent bans.
@@ -179,7 +183,7 @@ def ban_player(
     cmd = adapter.build_ban_command(
         player_name=body.player_name, net_id=body.net_id, reason=reason, minutes=minutes
     )
-    result = _exec(db, server_id, cmd)
+    result = _exec(db, server_id, cmd, user)
     _log_moderation(
         db,
         server,
@@ -189,6 +193,7 @@ def ban_player(
         net_id=body.net_id,
         reason=reason,
         detail=f"{minutes} minutes",
+        actor=user,
     )
     return result
 
@@ -197,8 +202,8 @@ def ban_player(
 def permban_player(
     server_id: int,
     body: PlayerActionRequest,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
     adapter = _require_feature(server, "kick_ban")
@@ -206,7 +211,7 @@ def permban_player(
     cmd = adapter.build_permban_command(
         player_name=body.player_name, net_id=body.net_id, reason=reason
     )
-    result = _exec(db, server_id, cmd)
+    result = _exec(db, server_id, cmd, user)
     _log_moderation(
         db,
         server,
@@ -216,6 +221,7 @@ def permban_player(
         net_id=body.net_id,
         reason=reason,
         detail="permanent",
+        actor=user,
     )
     return result
 
@@ -224,13 +230,13 @@ def permban_player(
 def unban_player(
     server_id: int,
     body: UnbanRequest,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
     adapter = _require_feature(server, "kick_ban")
     net_id = body.net_id.strip()
-    result = _exec(db, server_id, adapter.build_unban_command(net_id))
+    result = _exec(db, server_id, adapter.build_unban_command(net_id), user)
     _log_moderation(
         db,
         server,
@@ -238,6 +244,7 @@ def unban_player(
         result=result,
         net_id=net_id,
         reason="",
+        actor=user,
     )
     if result.ok:
         try:
@@ -268,11 +275,11 @@ def _ban_list_out(server_id: int, cached: dict, *, from_cache: bool, ok: bool | 
 @router.get("/api/servers/{server_id}/bans", response_model=BanListOut)
 def list_bans(
     server_id: int,
+    user: CurrentUser,
     refresh: bool = False,
     page: int = 1,
     page_size: int = 25,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> BanListOut:
     """
     Return structured bans for a server (paginated).
@@ -303,7 +310,7 @@ def list_bans(
             return _ban_list_out(server_id, cached, from_cache=True)
         # No cache yet - fall through to live fetch once
 
-    result = _exec(db, server_id, "listbans")
+    result = _exec(db, server_id, "listbans", user)
     if not result.ok:
         cached = load_cached_bans(db, server_id, page=page, page_size=page_size)
         if cached.get("has_snapshot"):
@@ -345,22 +352,21 @@ def list_bans(
 def travel(
     server_id: int,
     body: TravelRequest,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> RconCommandResponse:
     server = get_server_or_404(db, server_id)
     _require_feature(server, "map_travel")
     preview = _build_travel(db, body, server.server_type or DEFAULT_SERVER_TYPE)
     if not body.execute:
         return RconCommandResponse(command=preview.command, response=preview.command, ok=True)
-    return _exec(db, server_id, preview.command)
+    return _exec(db, server_id, preview.command, user)
 
 
 @router.post("/api/travel/preview", response_model=TravelPreview)
 def travel_preview(
     body: TravelRequest,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> TravelPreview:
     return _build_travel(db, body, DEFAULT_SERVER_TYPE)
 
@@ -400,7 +406,6 @@ def _build_travel(db: Session, body: TravelRequest, server_type: str) -> TravelP
 def command_history(
     server_id: int,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
     limit: int = 50,
 ) -> list[CommandHistoryOut]:
     get_server_or_404(db, server_id)

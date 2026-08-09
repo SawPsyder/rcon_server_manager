@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.api.servers import get_server_or_404
 from app.database import get_db
-from app.deps import require_admin
 from app.models import PlayerCountSample
 from app.services.roster import roster_from_json, roster_names
 
@@ -204,7 +203,6 @@ def player_stats(
     server_id: int,
     range: str = Query(default="24h", pattern="^(24h|7d|30d|180d|1y)$"),
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> PlayerStatsOut:
     get_server_or_404(db, server_id)
     return build_player_stats(db, server_id, range)

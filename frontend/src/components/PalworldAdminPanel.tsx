@@ -464,11 +464,7 @@ export default function PalworldAdminPanel({ serverId, onChanged }: Props) {
                   }
                 />
                 <p className="muted pw-map-footnote">
-                  Map art © Pocketpair (Palworld). Toggle layers for workers, wild pals,
-                  and NPCs. Double-click a player or base below to zoom to 3000%;
-                  double-click a player to follow them live.{" "}
-                  <strong>Share</strong> copies a public full-screen link;{" "}
-                  <strong>Full screen</strong> opens the admin map (← Server to return).
+                  Map art © Pocketpair (Palworld).
                 </p>
               </div>
 

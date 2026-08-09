@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import logging
+import secrets
 from pathlib import Path
 
 import bcrypt
@@ -28,17 +29,73 @@ def _serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.secret_key, salt="ssm-session")
 
 
-def create_session_token(subject: str = "admin") -> str:
-    return _serializer().dumps({"sub": subject})
+def _mfa_serializer() -> URLSafeTimedSerializer:
+    """Separate salt from the session serializer.
+
+    A partially-authenticated token (password accepted, TOTP still pending) must
+    never be replayable as a full session cookie. Different salt means a token
+    minted here cannot be loaded by _serializer() even though both are signed
+    with SECRET_KEY.
+    """
+    settings = get_settings()
+    return URLSafeTimedSerializer(settings.secret_key, salt="ssm-mfa")
 
 
-def load_session_token(token: str) -> str | None:
+# Session payload version. v1 was {"sub": "admin"} from the single-password era
+# and is deliberately rejected: it carries no user id, so honouring it would
+# grant unattributed, unrevocable admin.
+SESSION_VERSION = 2
+
+
+def create_session_token(user_id: int, token_version: int) -> str:
+    return _serializer().dumps(
+        {"v": SESSION_VERSION, "uid": int(user_id), "tv": int(token_version)}
+    )
+
+
+def load_session_payload(token: str) -> dict | None:
     settings = get_settings()
     try:
         data = _serializer().loads(token, max_age=settings.session_max_age)
-        return data.get("sub")
     except (BadSignature, SignatureExpired, TypeError, AttributeError):
         return None
+    if not isinstance(data, dict):
+        return None
+    if "uid" not in data:
+        # Pre-multi-user cookie. Logged once per occurrence at INFO so a wave of
+        # forced re-logins after upgrade is explainable rather than mysterious.
+        logger.info("Rejected legacy session cookie (no user id); re-login required")
+        return None
+    return data
+
+
+MFA_TOKEN_MAX_AGE = 300  # 5 minutes to enter a TOTP code
+
+
+def create_mfa_token(user_id: int, token_version: int) -> str:
+    return _mfa_serializer().dumps({"uid": int(user_id), "tv": int(token_version)})
+
+
+def load_mfa_payload(token: str) -> dict | None:
+    try:
+        data = _mfa_serializer().loads(token, max_age=MFA_TOKEN_MAX_AGE)
+    except (BadSignature, SignatureExpired, TypeError, AttributeError):
+        return None
+    return data if isinstance(data, dict) and "uid" in data else None
+
+
+def generate_url_token() -> str:
+    """Raw invite / reset token. Only ever sent by mail; never stored as-is."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_url_token(raw: str) -> str:
+    """sha256 hex of an invite/reset token.
+
+    Not bcrypt: the column is indexed for lookup, and a 256-bit random token has
+    no low-entropy guess space that a slow KDF would protect.
+    """
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _is_valid_fernet_key(key: bytes) -> bool:

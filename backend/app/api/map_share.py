@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from app.api.palworld import _client, summarize_game_data
 from app.api.servers import get_server_or_404
 from app.database import get_db
-from app.deps import require_admin
 from app.models import MapShare, Server, utcnow
 from app.schemas import PalworldWorldOut
 from app.services.palworld_api import GAMEDATA_DISABLED_CODE, PalworldApiError
@@ -72,7 +71,6 @@ def _get_share_by_token(db: Session, token: str) -> MapShare:
 def get_map_share(
     server_id: int,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> MapShareOut:
     _require_palworld(db, server_id)
     row = db.query(MapShare).filter(MapShare.server_id == server_id).first()
@@ -85,7 +83,6 @@ def get_map_share(
 def create_or_get_map_share(
     server_id: int,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> MapShareOut:
     _require_palworld(db, server_id)
     row = db.query(MapShare).filter(MapShare.server_id == server_id).first()
@@ -110,7 +107,6 @@ def create_or_get_map_share(
 def revoke_map_share(
     server_id: int,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> Response:
     _require_palworld(db, server_id)
     row = db.query(MapShare).filter(MapShare.server_id == server_id).first()

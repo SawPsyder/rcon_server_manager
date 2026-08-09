@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import require_admin
+from app.deps import AdminUser
 from app.models import Setting
 from app.schemas import SettingsOut, SettingsUpdate, TypeSettingsOut
 from app.server_types import get_adapter, list_adapters, list_server_types
@@ -41,8 +41,11 @@ def _type_settings(db: Session) -> dict[str, TypeSettingsOut]:
     return out
 
 
+# Readable by every signed-in user: the overview and server detail pages both
+# need poll_interval_seconds, and this exposes only intervals and per-type
+# gamemode defaults. Writing them is admin-only (see update_settings).
 @router.get("", response_model=SettingsOut)
-def get_settings_api(db: Session = Depends(get_db), _admin: str = Depends(require_admin)) -> SettingsOut:
+def get_settings_api(db: Session = Depends(get_db)) -> SettingsOut:
     return SettingsOut(
         query_timeout=float(_get(db, "query_timeout", "2.0")),
         poll_interval_seconds=int(_get(db, "poll_interval_seconds", "10")),
@@ -54,8 +57,8 @@ def get_settings_api(db: Session = Depends(get_db), _admin: str = Depends(requir
 @router.put("", response_model=SettingsOut)
 def update_settings(
     body: SettingsUpdate,
+    _admin: AdminUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> SettingsOut:
     if body.query_timeout is not None:
         _set(db, "query_timeout", str(body.query_timeout))
@@ -71,7 +74,7 @@ def update_settings(
             if ts.preferred_gamemode is not None:
                 _set(db, _type_preferred_key(type_id), ts.preferred_gamemode.strip())
     db.commit()
-    return get_settings_api(db, _admin)
+    return get_settings_api(db)
 
 
 def resolve_preferred_gamemode(db: Session, server_type: str, server_override: str | None) -> str:

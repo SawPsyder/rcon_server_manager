@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import require_admin
-from app.models import Server
+from app.deps import AdminUser, CurrentUser
+from app.models import Server, ServerGrant, User
 from app.schemas import (
     QuickButtonOut,
     ServerCreate,
@@ -29,17 +29,26 @@ def _options_out(server: Server) -> ServerOptionsOut:
     )
 
 
-def _to_out(server: Server) -> ServerOut:
+def _to_out(server: Server, viewer: User | None = None) -> ServerOut:
+    """Serialise a server.
+
+    Non-admin viewers get the admin control plane redacted: the RCON port and
+    the TLS options describe how we reach the server, and handing them to an
+    operator widens the blast radius of a leaked password for no UI benefit.
+    Host and query port stay - they are the public game endpoint every player
+    already knows, and the detail page seeds its status card from them.
+    """
+    redact = viewer is not None and not viewer.is_admin
     return ServerOut(
         id=server.id,
         name=server.name,
         host=server.host,
         query_port=server.query_port,
-        rcon_port=server.rcon_port,
+        rcon_port=None if redact else server.rcon_port,
         server_type=server.server_type or DEFAULT_SERVER_TYPE,
         preferred_gamemode=server.preferred_gamemode,
         has_rcon_password=bool(server.rcon_password_enc),
-        options=_options_out(server),
+        options=ServerOptionsOut() if redact else _options_out(server),
         last_hostname=getattr(server, "last_hostname", None),
         last_map=getattr(server, "last_map", None),
         last_lighting=getattr(server, "last_lighting", None),
@@ -80,7 +89,7 @@ def _apply_options(server: Server, options) -> None:
 
 
 @router.get("/types", response_model=list[ServerTypeOut])
-def server_types(_admin: str = Depends(require_admin)) -> list[ServerTypeOut]:
+def server_types() -> list[ServerTypeOut]:
     out: list[ServerTypeOut] = []
     for info in list_server_types():
         out.append(
@@ -106,16 +115,26 @@ def server_types(_admin: str = Depends(require_admin)) -> list[ServerTypeOut]:
 
 
 @router.get("", response_model=list[ServerOut])
-def list_servers(db: Session = Depends(get_db), _admin: str = Depends(require_admin)) -> list[ServerOut]:
-    servers = db.query(Server).order_by(Server.name.asc()).all()
-    return [_to_out(s) for s in servers]
+def list_servers(user: CurrentUser, db: Session = Depends(get_db)) -> list[ServerOut]:
+    """Servers the caller may operate. Admins see all; everyone else sees grants.
+
+    This is also what filters the overview page - it calls this endpoint - and
+    it does not go through get_server_or_404, so the filter has to live here.
+    """
+    query = db.query(Server)
+    if not user.is_admin:
+        query = query.join(ServerGrant, ServerGrant.server_id == Server.id).filter(
+            ServerGrant.user_id == user.id
+        )
+    servers = query.order_by(Server.name.asc()).all()
+    return [_to_out(s, user) for s in servers]
 
 
 @router.post("", response_model=ServerOut, status_code=status.HTTP_201_CREATED)
 def create_server(
     body: ServerCreate,
+    _admin: AdminUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> ServerOut:
     st = _validate_type(body.server_type)
     preferred = (body.preferred_gamemode or "").strip() or None
@@ -140,21 +159,24 @@ def create_server(
 @router.get("/{server_id}", response_model=ServerOut)
 def get_server(
     server_id: int,
+    user: CurrentUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> ServerOut:
     server = db.get(Server, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
-    return _to_out(server)
+    return _to_out(server, user)
 
 
+# Connection settings. Admin-only: host, ports, the RCON secret, the server type
+# and the TLS options all define how we reach the game server, and a granted
+# operator must not be able to repoint or lock out a server they only moderate.
 @router.put("/{server_id}", response_model=ServerOut)
 def update_server(
     server_id: int,
     body: ServerUpdate,
+    _admin: AdminUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> ServerOut:
     server = db.get(Server, server_id)
     if not server:
@@ -207,8 +229,8 @@ def update_server(
 @router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_server(
     server_id: int,
+    _admin: AdminUser,
     db: Session = Depends(get_db),
-    _admin: str = Depends(require_admin),
 ) -> None:
     server = db.get(Server, server_id)
     if not server:

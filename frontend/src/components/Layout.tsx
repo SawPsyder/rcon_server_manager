@@ -2,7 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth";
 
 export default function Layout() {
-  const { logout } = useAuth();
+  const { logout, user, isAdmin } = useAuth();
 
   return (
     <div className="app-shell">
@@ -18,8 +18,12 @@ export default function Layout() {
           <NavLink to="/" end>
             Dashboard
           </NavLink>
-          <NavLink to="/servers">Servers</NavLink>
+          {isAdmin && <NavLink to="/servers">Servers</NavLink>}
+          {isAdmin && <NavLink to="/users">Users</NavLink>}
           <NavLink to="/settings">Settings</NavLink>
+          <NavLink to="/account">
+            {user?.display_name || user?.email || "Account"}
+          </NavLink>
           <button className="btn ghost" onClick={() => logout()}>
             Logout
           </button>

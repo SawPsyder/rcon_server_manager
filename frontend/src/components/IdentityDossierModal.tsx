@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { api, IdentityDossier, parseIdentity, PlayerActionLog } from "../api";
+import { api, IdentityDossier, parseIdentity, PlayerActionLog, PlayerNote } from "../api";
+import { useAuth } from "../auth";
 
 type Props = {
   open: boolean;
@@ -19,6 +20,25 @@ function formatWhen(iso: string): string {
   }
 }
 
+function formatRelative(iso: string): string {
+  try {
+    const then = new Date(iso).getTime();
+    const now = Date.now();
+    const sec = Math.round((now - then) / 1000);
+    if (!Number.isFinite(sec)) return formatWhen(iso);
+    if (sec < 45) return "just now";
+    if (sec < 90) return "1 minute ago";
+    if (sec < 3600) return `${Math.round(sec / 60)} minutes ago`;
+    if (sec < 5400) return "1 hour ago";
+    if (sec < 86400) return `${Math.round(sec / 3600)} hours ago`;
+    if (sec < 172800) return "1 day ago";
+    if (sec < 86400 * 30) return `${Math.round(sec / 86400)} days ago`;
+    return formatWhen(iso);
+  } catch {
+    return formatWhen(iso);
+  }
+}
+
 function formatActionLine(a: PlayerActionLog): string {
   const parts = [
     formatWhen(a.created_at),
@@ -31,6 +51,10 @@ function formatActionLine(a: PlayerActionLog): string {
   return parts.join(" · ");
 }
 
+function noteAuthorName(note: PlayerNote): string {
+  return (note.author_label || "").trim() || "Unknown";
+}
+
 export default function IdentityDossierModal({
   open,
   netId,
@@ -38,22 +62,26 @@ export default function IdentityDossierModal({
   onClose,
   onChanged,
 }: Props) {
+  const { user, isAdmin } = useAuth();
   const [dossier, setDossier] = useState<IdentityDossier | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [note, setNote] = useState("");
-  const [savedNote, setSavedNote] = useState("");
+  const [myNote, setMyNote] = useState("");
+  const [savedMyNote, setSavedMyNote] = useState("");
+  const [myNoteId, setMyNoteId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
 
   const ident = parseIdentity(netId);
+  const myUserId = user?.id ?? null;
 
   const load = async () => {
     if (!ident) {
       setError("No platform id available for this player.");
       setDossier(null);
-      setNote("");
-      setSavedNote("");
+      setMyNote("");
+      setSavedMyNote("");
+      setMyNoteId(null);
       return;
     }
     setLoading(true);
@@ -61,12 +89,14 @@ export default function IdentityDossierModal({
     try {
       const d = await api.identityDossier(ident.platform, ident.external_id);
       setDossier(d);
-      // Single editor: use newest note, or join legacy multi-notes once
-      const bodies = (d.notes || []).map((n) => n.body).filter(Boolean);
-      const text =
-        bodies.length <= 1 ? bodies[0] || "" : bodies.slice().reverse().join("\n\n");
-      setNote(text);
-      setSavedNote(text);
+      const mine =
+        myUserId == null
+          ? undefined
+          : (d.notes || []).find((n) => n.author_user_id === myUserId);
+      const text = mine?.body || "";
+      setMyNote(text);
+      setSavedMyNote(text);
+      setMyNoteId(mine?.id ?? null);
       setHistoryPage(1);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -81,7 +111,7 @@ export default function IdentityDossierModal({
       load();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, netId]);
+  }, [open, netId, myUserId]);
 
   const actions = dossier?.actions || [];
   const historyTotalPages = Math.max(1, Math.ceil(actions.length / HISTORY_PAGE_SIZE));
@@ -91,9 +121,22 @@ export default function IdentityDossierModal({
     return actions.slice(start, start + HISTORY_PAGE_SIZE);
   }, [actions, historyPageSafe]);
 
+  const othersNotes = useMemo(() => {
+    const notes = dossier?.notes || [];
+    return notes
+      .filter((n) => n.author_user_id !== myUserId)
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime() ||
+          b.id - a.id,
+      );
+  }, [dossier?.notes, myUserId]);
+
   if (!open) return null;
 
-  const dirty = note !== savedNote;
+  const dirty = myNote !== savedMyNote;
+  const newestOther = othersNotes[0];
 
   const onSaveNote = async (e: FormEvent) => {
     e.preventDefault();
@@ -101,8 +144,43 @@ export default function IdentityDossierModal({
     setBusy(true);
     setError("");
     try {
-      await api.setIdentityNote(ident.platform, ident.external_id, note);
-      setSavedNote(note);
+      await api.setIdentityNote(ident.platform, ident.external_id, myNote);
+      setSavedMyNote(myNote);
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteOwnNote = async () => {
+    if (!ident || myNoteId == null) return;
+    if (!window.confirm("Delete your note for this player?")) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.deleteIdentityNote(myNoteId);
+      setMyNote("");
+      setSavedMyNote("");
+      setMyNoteId(null);
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteOrphan = async (note: PlayerNote) => {
+    if (!isAdmin || note.author_user_id != null) return;
+    if (!window.confirm("Delete this legacy note with no author?")) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.deleteIdentityNote(note.id);
       await load();
       onChanged?.();
     } catch (err) {
@@ -178,14 +256,40 @@ export default function IdentityDossierModal({
         {!loading && (
           <>
             <section style={{ marginTop: "1.1rem" }}>
-              <h3 style={{ margin: "0 0 0.5rem" }}>Admin notes</h3>
-              <form className="stack" onSubmit={onSaveNote}>
+              <div className="row between wrap" style={{ marginBottom: "0.5rem" }}>
+                <h3 style={{ margin: 0 }}>Notes</h3>
+                {newestOther ? (
+                  <span className="muted" style={{ fontSize: "0.8rem" }}>
+                    Last team update {formatRelative(newestOther.updated_at)}
+                    {newestOther.author_label
+                      ? ` · ${noteAuthorName(newestOther)}`
+                      : ""}
+                  </span>
+                ) : null}
+              </div>
+
+              <form className="stack note-own" onSubmit={onSaveNote}>
+                <div className="row between wrap">
+                  <span className="note-author-label">Your note</span>
+                  {myNoteId != null && savedMyNote ? (
+                    <span className="muted" style={{ fontSize: "0.8rem" }}>
+                      Updated {formatRelative(
+                        (dossier?.notes || []).find((n) => n.id === myNoteId)?.updated_at ||
+                          new Date().toISOString(),
+                      )}
+                    </span>
+                  ) : (
+                    <span className="muted" style={{ fontSize: "0.8rem" }}>
+                      Only you can edit this
+                    </span>
+                  )}
+                </div>
                 <textarea
                   className="note-editor"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  rows={8}
-                  placeholder="Notes about this player…"
+                  value={myNote}
+                  onChange={(e) => setMyNote(e.target.value)}
+                  rows={5}
+                  placeholder="Your private-to-edit notes about this player (everyone can read them)…"
                   disabled={!ident || busy}
                 />
                 <div className="row wrap">
@@ -194,11 +298,59 @@ export default function IdentityDossierModal({
                     type="submit"
                     disabled={!ident || busy || !dirty}
                   >
-                    {busy ? "Saving…" : "Save notes"}
+                    {busy ? "Saving…" : "Save your note"}
                   </button>
+                  {myNoteId != null && (
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void onDeleteOwnNote()}
+                    >
+                      Delete
+                    </button>
+                  )}
                   {dirty && <span className="muted">Unsaved changes</span>}
                 </div>
               </form>
+
+              {othersNotes.length > 0 ? (
+                <ul className="note-list" style={{ marginTop: "0.9rem" }}>
+                  {othersNotes.map((n) => (
+                    <li key={n.id} className="note-card">
+                      <div className="row between wrap note-card-head">
+                        <strong>{noteAuthorName(n)}</strong>
+                        <span
+                          className="muted"
+                          style={{ fontSize: "0.8rem" }}
+                          title={formatWhen(n.updated_at)}
+                        >
+                          Updated {formatRelative(n.updated_at)}
+                        </span>
+                      </div>
+                      <div className="note-card-body">
+                        {n.body.trim() ? n.body : <span className="muted">(empty)</span>}
+                      </div>
+                      {isAdmin && n.author_user_id == null ? (
+                        <div className="row" style={{ marginTop: "0.45rem" }}>
+                          <button
+                            type="button"
+                            className="btn small ghost"
+                            disabled={busy}
+                            onClick={() => void onDeleteOrphan(n)}
+                          >
+                            Remove legacy note
+                          </button>
+                        </div>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted" style={{ margin: "0.75rem 0 0", fontSize: "0.85rem" }}>
+                  No notes from other operators yet.
+                </p>
+              )}
             </section>
 
             <section style={{ marginTop: "1.25rem" }}>

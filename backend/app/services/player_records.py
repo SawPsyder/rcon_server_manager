@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import PlayerActionLog, PlayerAdminNote, Server
+from app.models import PlayerActionLog, PlayerAdminNote, Server, User
 from app.services.identity import parse_net_id, remember_identity
 
 STEAM_ID_RE = re.compile(r"^\d{17}$")
@@ -52,6 +52,7 @@ def log_player_action(
     ok: bool = True,
     error: str = "",
     platform_hint: str = "",
+    actor: "User | None" = None,
 ) -> PlayerActionLog | None:
     """Persist a moderation action. Skips if no usable platform id."""
     ident = normalize_identity(net_id=net_id, platform_hint=platform_hint)
@@ -90,6 +91,10 @@ def log_player_action(
         detail=(detail or "").strip(),
         ok=bool(ok),
         error=(error or "").strip(),
+        # actor_label freezes the operator's email so the log stays readable
+        # after the account is deleted and actor_user_id goes null.
+        actor_user_id=actor.id if actor else None,
+        actor_label=(actor.display_name or actor.email) if actor else "",
         created_at=datetime.now(timezone.utc),
     )
     db.add(row)
@@ -120,7 +125,25 @@ def identity_has_records(db: Session, platform: str, external_id: str) -> bool:
     return notes is not None
 
 
-def batch_has_records(db: Session, identities: list[tuple[str, str]]) -> dict[str, bool]:
+def _scope_actions(query, allowed_server_ids: set[int] | None):
+    """Restrict a PlayerActionLog query to servers the caller may see.
+
+    None means unrestricted (admin). For everyone else this also hides rows with
+    a null server_id - those belong to a since-deleted server and there is no
+    way to tell whether the caller was ever granted it.
+    """
+    if allowed_server_ids is None:
+        return query
+    if not allowed_server_ids:
+        return query.filter(False)
+    return query.filter(PlayerActionLog.server_id.in_(allowed_server_ids))
+
+
+def batch_has_records(
+    db: Session,
+    identities: list[tuple[str, str]],
+    allowed_server_ids: set[int] | None = None,
+) -> dict[str, bool]:
     """
     identities: list of (platform, external_id)
     Returns map external_id -> has_info (external_id alone is unique enough with platform
@@ -141,10 +164,12 @@ def batch_has_records(db: Session, identities: list[tuple[str, str]]) -> dict[st
     platforms = {p for p, _ in keys}
     ext_ids = {e for _, e in keys}
     for row in (
-        db.query(PlayerActionLog.platform, PlayerActionLog.external_id)
-        .filter(
-            PlayerActionLog.platform.in_(platforms),
-            PlayerActionLog.external_id.in_(ext_ids),
+        _scope_actions(
+            db.query(PlayerActionLog.platform, PlayerActionLog.external_id).filter(
+                PlayerActionLog.platform.in_(platforms),
+                PlayerActionLog.external_id.in_(ext_ids),
+            ),
+            allowed_server_ids,
         )
         .distinct()
         .all()
@@ -169,7 +194,12 @@ def batch_has_records(db: Session, identities: list[tuple[str, str]]) -> dict[st
     return out
 
 
-def get_dossier(db: Session, platform: str, external_id: str) -> dict[str, Any]:
+def get_dossier(
+    db: Session,
+    platform: str,
+    external_id: str,
+    allowed_server_ids: set[int] | None = None,
+) -> dict[str, Any]:
     from app.models import IdentityCache
     from app.services.identity import resolve_names
 
@@ -195,11 +225,15 @@ def get_dossier(db: Session, platform: str, external_id: str) -> dict[str, Any]:
         .first()
     )
 
+    # Moderation history is per-server. Without this filter a user granted one
+    # server would learn the names of every other server and its ban history.
     actions = (
-        db.query(PlayerActionLog)
-        .filter(
-            PlayerActionLog.platform == platform,
-            PlayerActionLog.external_id == external_id,
+        _scope_actions(
+            db.query(PlayerActionLog).filter(
+                PlayerActionLog.platform == platform,
+                PlayerActionLog.external_id == external_id,
+            ),
+            allowed_server_ids,
         )
         .order_by(PlayerActionLog.created_at.desc())
         .limit(200)
@@ -211,7 +245,7 @@ def get_dossier(db: Session, platform: str, external_id: str) -> dict[str, Any]:
             PlayerAdminNote.platform == platform,
             PlayerAdminNote.external_id == external_id,
         )
-        .order_by(PlayerAdminNote.created_at.desc())
+        .order_by(PlayerAdminNote.updated_at.desc(), PlayerAdminNote.id.desc())
         .limit(100)
         .all()
     )
@@ -234,22 +268,33 @@ def get_dossier(db: Session, platform: str, external_id: str) -> dict[str, Any]:
     }
 
 
-def set_note(
+def note_author_label(db: Session, note: PlayerAdminNote) -> str:
+    """Display label for a note author; survives user deletion reasonably."""
+    if note.author_user_id is None:
+        return "Unknown"
+    author = db.get(User, note.author_user_id)
+    if author is None:
+        return "Former user"
+    return (author.display_name or author.email or f"User #{author.id}").strip()
+
+
+def upsert_own_note(
     db: Session,
     *,
     platform: str,
     external_id: str,
     body: str,
+    author: User,
 ) -> PlayerAdminNote | None:
-    """
-    Upsert a single admin note document for this identity.
-    Empty body clears all notes. Multiple legacy rows are collapsed into one.
+    """Upsert the caller's own note for this identity.
+
+    Empty body deletes only the caller's note. Other authors' notes are untouched.
     """
     platform = platform.strip().lower()
     external_id = external_id.strip()
     if not external_id:
         raise ValueError("external_id is required")
-    text = body if body is not None else ""
+    text = (body if body is not None else "").strip()
     now = datetime.now(timezone.utc)
 
     existing = (
@@ -257,46 +302,30 @@ def set_note(
         .filter(
             PlayerAdminNote.platform == platform,
             PlayerAdminNote.external_id == external_id,
+            PlayerAdminNote.author_user_id == author.id,
         )
-        .order_by(PlayerAdminNote.created_at.asc())
-        .all()
+        .first()
     )
 
-    if not text.strip():
-        for row in existing:
-            db.delete(row)
+    if not text:
+        if existing is not None:
+            db.delete(existing)
         return None
 
-    if existing:
-        note = existing[0]
-        note.body = text
-        note.updated_at = now
-        for row in existing[1:]:
-            db.delete(row)
-        return note
+    if existing is not None:
+        existing.body = text
+        existing.updated_at = now
+        return existing
 
     note = PlayerAdminNote(
         platform=platform,
         external_id=external_id,
         body=text,
+        author_user_id=author.id,
         created_at=now,
         updated_at=now,
     )
     db.add(note)
-    return note
-
-
-def add_note(
-    db: Session,
-    *,
-    platform: str,
-    external_id: str,
-    body: str,
-) -> PlayerAdminNote:
-    """Backward-compatible alias: set non-empty note body."""
-    note = set_note(db, platform=platform, external_id=external_id, body=body)
-    if note is None:
-        raise ValueError("Note body is required")
     return note
 
 

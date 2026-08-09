@@ -154,7 +154,8 @@ export default function ServersPage() {
       name: s.name,
       host: s.host,
       query_port: s.query_port,
-      rcon_port: s.rcon_port,
+      // Only ever null for non-admins, who cannot reach this page at all.
+      rcon_port: s.rcon_port ?? s.query_port,
       rcon_password: "",
       server_type: s.server_type || "sandstorm",
       preferred_gamemode: s.preferred_gamemode || "",
