@@ -49,6 +49,8 @@ Connects via **Source Query + RCON** (defaults: query `27131`, RCON `27015`).
 - Map / gamemode travel and quick commands
 - RCON console
 - Player history and playtime tracking
+- Global **Players** page: overall and per-server playtime ranks for everyone ever seen
+- Link multiple platform accounts (Steam / Xbox / PSN / …) as one person for ranking; dossier keeps notes and moderation history per account
 
 ### Satisfactory
 

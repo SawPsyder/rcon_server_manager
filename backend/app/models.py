@@ -436,6 +436,52 @@ class IdentityCache(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class IdentityLinkGroup(Base):
+    """A set of platform identities that belong to one natural person.
+
+    Created when an operator links two accounts (e.g. Steam + Xbox). Playtime
+    and the Players leaderboard treat every member as one person; moderation
+    notes/history stay keyed per platform identity and are shown as separate
+    sections in the dossier.
+    """
+
+    __tablename__ = "identity_link_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    members: Mapped[list["IdentityLinkMember"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
+
+
+class IdentityLinkMember(Base):
+    """One platform identity in a link group. At most one group per identity."""
+
+    __tablename__ = "identity_link_members"
+    __table_args__ = (
+        UniqueConstraint("platform", "external_id", name="uq_identity_link_member"),
+        Index("ix_identity_link_group", "group_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("identity_link_groups.id", ondelete="CASCADE"), nullable=False
+    )
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    linked_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    group: Mapped[IdentityLinkGroup] = relationship(back_populates="members")
+
+
 class PlayerActionLog(Base):
     """Kick / ban / permban / unban (and similar) history keyed by platform id."""
 

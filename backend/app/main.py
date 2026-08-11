@@ -13,6 +13,7 @@ from app.api import (
     map_share,
     maps,
     palworld,
+    player_leaderboard,
     pterodactyl,
     rcon,
     satisfactory,
@@ -72,6 +73,7 @@ app.include_router(rcon.router, dependencies=SCOPED)
 app.include_router(maps.router, dependencies=AUTHED)
 app.include_router(settings.router, dependencies=AUTHED)
 app.include_router(identities.router, dependencies=AUTHED)
+app.include_router(player_leaderboard.router, dependencies=AUTHED)
 app.include_router(satisfactory.router, dependencies=SCOPED)
 app.include_router(palworld.router, dependencies=SCOPED)
 app.include_router(server_pterodactyl.router, dependencies=SCOPED)
