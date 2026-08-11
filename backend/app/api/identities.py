@@ -1,4 +1,4 @@
-"""Player identity dossier: history + per-user notes."""
+"""Player identity dossier: history + per-user notes + account linking."""
 
 from __future__ import annotations
 
@@ -12,10 +12,13 @@ from app.schemas import (
     IdentityDossierOut,
     IdentityFlagsOut,
     IdentityFlagsRequest,
+    IdentityLinkRequest,
+    IdentityProfileOut,
     PlayerActionLogOut,
     PlayerNoteCreate,
     PlayerNoteOut,
 )
+from app.services.identity_links import link_identities, unlink_identity
 from app.services.player_records import (
     batch_has_records,
     delete_note,
@@ -38,6 +41,38 @@ def _note_out(db: Session, note: PlayerAdminNote) -> PlayerNoteOut:
         author_label=note_author_label(db, note),
         created_at=note.created_at,
         updated_at=note.updated_at,
+    )
+
+
+def _dossier_out(db: Session, data: dict) -> IdentityDossierOut:
+    profiles: list[IdentityProfileOut] = []
+    for prof in data.get("profiles") or []:
+        profiles.append(
+            IdentityProfileOut(
+                platform=prof["platform"],
+                external_id=prof["external_id"],
+                net_id=prof.get("net_id") or "",
+                display_name=prof.get("display_name") or "",
+                profile_url=prof.get("profile_url") or "",
+                avatar_url=prof.get("avatar_url") or "",
+                has_info=bool(prof.get("has_info")),
+                actions=[
+                    PlayerActionLogOut.model_validate(a) for a in (prof.get("actions") or [])
+                ],
+                notes=[_note_out(db, n) for n in (prof.get("notes") or [])],
+            )
+        )
+    return IdentityDossierOut(
+        platform=data["platform"],
+        external_id=data["external_id"],
+        display_name=data["display_name"],
+        profile_url=data["profile_url"],
+        avatar_url=data["avatar_url"],
+        has_info=data["has_info"],
+        actions=[PlayerActionLogOut.model_validate(a) for a in data["actions"]],
+        notes=[_note_out(db, n) for n in data["notes"]],
+        link_group_id=data.get("link_group_id"),
+        profiles=profiles,
     )
 
 
@@ -72,16 +107,60 @@ def identity_dossier(
 ) -> IdentityDossierOut:
     # external_id may be URL-encoded EOS id with |
     data = get_dossier(db, platform, external_id, granted_server_ids(db, user))
-    return IdentityDossierOut(
-        platform=data["platform"],
-        external_id=data["external_id"],
-        display_name=data["display_name"],
-        profile_url=data["profile_url"],
-        avatar_url=data["avatar_url"],
-        has_info=data["has_info"],
-        actions=[PlayerActionLogOut.model_validate(a) for a in data["actions"]],
-        notes=[_note_out(db, n) for n in data["notes"]],
-    )
+    return _dossier_out(db, data)
+
+
+@router.post("/{platform}/{external_id}/link", response_model=IdentityDossierOut)
+def link_account(
+    platform: str,
+    external_id: str,
+    body: IdentityLinkRequest,
+    user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> IdentityDossierOut:
+    """Link another platform account to this identity (same natural person)."""
+    other: tuple[str, str] | None = None
+    if (body.platform or "").strip() and (body.external_id or "").strip():
+        other = (body.platform.strip().lower(), body.external_id.strip())
+    else:
+        net = (body.net_id or "").strip()
+        if net:
+            other = normalize_identity(net_id=net)
+    if other is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide net_id (e.g. SteamID64 or gdk_…) or platform + external_id",
+        )
+
+    try:
+        link_identities(
+            db,
+            a=(platform, external_id),
+            b=other,
+            actor=user,
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    data = get_dossier(db, platform, external_id, granted_server_ids(db, user))
+    return _dossier_out(db, data)
+
+
+@router.delete("/{platform}/{external_id}/link", response_model=IdentityDossierOut)
+def unlink_account(
+    platform: str,
+    external_id: str,
+    user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> IdentityDossierOut:
+    """Remove this identity from its link group (other members stay linked)."""
+    if not unlink_identity(db, platform=platform, external_id=external_id):
+        raise HTTPException(status_code=404, detail="This account is not linked to others")
+    db.commit()
+    data = get_dossier(db, platform, external_id, granted_server_ids(db, user))
+    return _dossier_out(db, data)
 
 
 @router.put("/{platform}/{external_id}/notes", response_model=None)

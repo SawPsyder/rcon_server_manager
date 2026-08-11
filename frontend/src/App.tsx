@@ -4,6 +4,7 @@ import Layout from "./components/Layout";
 import AccountPage from "./pages/AccountPage";
 import LoginPage from "./pages/LoginPage";
 import OverviewPage from "./pages/OverviewPage";
+import PlayersPage from "./pages/PlayersPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import ServerDetailPage from "./pages/ServerDetailPage";
 import ServersPage from "./pages/ServersPage";
@@ -77,6 +78,7 @@ export default function App() {
         }
       >
         <Route index element={<OverviewPage />} />
+        <Route path="players" element={<PlayersPage />} />
         <Route path="server/:serverId" element={<ServerDetailPage />} />
         <Route path="account" element={<AccountPage />} />
         {/* Connection settings and user administration are admin-only. The

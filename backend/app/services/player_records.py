@@ -148,21 +148,29 @@ def batch_has_records(
     identities: list of (platform, external_id)
     Returns map external_id -> has_info (external_id alone is unique enough with platform
     encoded in key as platform:external_id)
+
+    Linked accounts share the flag: if any member of a person group has notes or
+    moderation history, every requested key in that group is marked true.
     """
     out: dict[str, bool] = {}
     if not identities:
         return out
 
-    keys = {(p, e) for p, e in identities if p and e}
+    keys = {(p.strip().lower(), e.strip()) for p, e in identities if p and e}
     for p, e in keys:
         out[f"{p}:{e}"] = False
 
     if not keys:
         return out
 
-    # Query actions
-    platforms = {p for p, _ in keys}
-    ext_ids = {e for _, e in keys}
+    from app.services.identity_links import expand_identity_set, load_link_map
+
+    link_map = load_link_map(db)
+    expanded = expand_identity_set(keys, link_map)
+
+    platforms = {p for p, _ in expanded}
+    ext_ids = {e for _, e in expanded}
+    hits: set[tuple[str, str]] = set()
     for row in (
         _scope_actions(
             db.query(PlayerActionLog.platform, PlayerActionLog.external_id).filter(
@@ -174,9 +182,7 @@ def batch_has_records(
         .distinct()
         .all()
     ):
-        k = f"{row[0]}:{row[1]}"
-        if k in out:
-            out[k] = True
+        hits.add((row[0], row[1]))
 
     for row in (
         db.query(PlayerAdminNote.platform, PlayerAdminNote.external_id)
@@ -187,34 +193,47 @@ def batch_has_records(
         .distinct()
         .all()
     ):
-        k = f"{row[0]}:{row[1]}"
-        if k in out:
-            out[k] = True
+        hits.add((row[0], row[1]))
+
+    if not hits:
+        return out
+
+    # Any hit on a linked member lights up every requested key in that person.
+    hit_groups = {link_map[h] for h in hits if h in link_map}
+    for p, e in keys:
+        if (p, e) in hits:
+            out[f"{p}:{e}"] = True
+            continue
+        gid = link_map.get((p, e))
+        if gid is not None and gid in hit_groups:
+            out[f"{p}:{e}"] = True
 
     return out
 
 
-def get_dossier(
+def _profile_shell(
     db: Session,
     platform: str,
     external_id: str,
-    allowed_server_ids: set[int] | None = None,
 ) -> dict[str, Any]:
+    """Display metadata for one platform identity (no actions/notes)."""
     from app.models import IdentityCache
     from app.services.identity import resolve_names
 
     platform = platform.strip().lower()
     external_id = external_id.strip()
 
-    # Resolve display name via cache/API
     raw_for_resolve = external_id
     if platform == "steam" and STEAM_ID_RE.fullmatch(external_id):
         raw_for_resolve = external_id
     elif platform == "eos":
         raw_for_resolve = f"EOS:{external_id}"
+    elif platform == "xbox":
+        # Prefer a presence-style key so resolve can hit PlayerServerStats.
+        raw_for_resolve = f"gdk_{external_id}"
 
-    names = resolve_names(db, [raw_for_resolve])
-    info = names.get(raw_for_resolve) or {}
+    names = resolve_names(db, [raw_for_resolve, external_id])
+    info = names.get(raw_for_resolve) or names.get(external_id) or {}
 
     cache_row = (
         db.query(IdentityCache)
@@ -225,8 +244,49 @@ def get_dossier(
         .first()
     )
 
-    # Moderation history is per-server. Without this filter a user granted one
-    # server would learn the names of every other server and its ban history.
+    display_name = (
+        info.get("display_name")
+        or (cache_row.display_name if cache_row else "")
+        or ""
+    )
+    profile_url = (
+        info.get("profile_url")
+        or (cache_row.profile_url if cache_row else "")
+        or ""
+    )
+    avatar_url = (
+        info.get("avatar_url")
+        or (cache_row.avatar_url if cache_row else "")
+        or ""
+    )
+
+    # Reconstruct a net_id operators can paste into kick/ban when known.
+    if platform == "steam" and STEAM_ID_RE.fullmatch(external_id):
+        net_id = external_id
+    elif platform == "eos":
+        net_id = f"EOS:{external_id}"
+    elif platform in {"xbox", "psn", "mac"} and external_id:
+        prefix = {"xbox": "gdk", "psn": "psn", "mac": "mac"}[platform]
+        net_id = f"{prefix}_{external_id}"
+    else:
+        net_id = external_id
+
+    return {
+        "platform": platform,
+        "external_id": external_id,
+        "net_id": net_id,
+        "display_name": display_name,
+        "profile_url": profile_url,
+        "avatar_url": avatar_url,
+    }
+
+
+def _profile_records(
+    db: Session,
+    platform: str,
+    external_id: str,
+    allowed_server_ids: set[int] | None,
+) -> tuple[list[PlayerActionLog], list[PlayerAdminNote]]:
     actions = (
         _scope_actions(
             db.query(PlayerActionLog).filter(
@@ -249,22 +309,58 @@ def get_dossier(
         .limit(100)
         .all()
     )
+    return actions, notes
+
+
+def get_dossier(
+    db: Session,
+    platform: str,
+    external_id: str,
+    allowed_server_ids: set[int] | None = None,
+) -> dict[str, Any]:
+    from app.services.identity_links import get_group_id, linked_identities
+
+    platform = platform.strip().lower()
+    external_id = external_id.strip()
+
+    members = linked_identities(db, platform, external_id)
+    # Requested identity first, then the rest alphabetically by platform.
+    ordered = [(platform, external_id)]
+    for p, e in members:
+        if (p, e) != (platform, external_id):
+            ordered.append((p, e))
+
+    profiles: list[dict[str, Any]] = []
+    any_info = False
+    for p, e in ordered:
+        shell = _profile_shell(db, p, e)
+        actions, notes = _profile_records(db, p, e, allowed_server_ids)
+        has = bool(actions or notes)
+        any_info = any_info or has
+        profiles.append(
+            {
+                **shell,
+                "has_info": has,
+                "actions": actions,
+                "notes": notes,
+            }
+        )
+
+    primary = profiles[0] if profiles else _profile_shell(db, platform, external_id)
+    group_id = get_group_id(db, platform, external_id)
 
     return {
         "platform": platform,
         "external_id": external_id,
-        "display_name": info.get("display_name")
-        or (cache_row.display_name if cache_row else "")
-        or "",
-        "profile_url": info.get("profile_url")
-        or (cache_row.profile_url if cache_row else "")
-        or "",
-        "avatar_url": info.get("avatar_url")
-        or (cache_row.avatar_url if cache_row else "")
-        or "",
-        "has_info": bool(actions or notes),
-        "actions": actions,
-        "notes": notes,
+        "display_name": primary.get("display_name") or "",
+        "profile_url": primary.get("profile_url") or "",
+        "avatar_url": primary.get("avatar_url") or "",
+        "has_info": any_info,
+        # Backward-compatible fields for the requested identity only.
+        "actions": primary.get("actions") or [],
+        "notes": primary.get("notes") or [],
+        "link_group_id": group_id,
+        "profiles": profiles,
     }
 
 

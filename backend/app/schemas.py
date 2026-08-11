@@ -503,6 +503,71 @@ class PlayerInfo(BaseModel):
     extra: dict[str, Any] | None = None
 
 
+class PlayerLeaderboardServerOut(BaseModel):
+    """One server's slice of a player's tracked playtime."""
+
+    server_id: int
+    server_name: str
+    server_type: str = ""
+    net_id: str = ""
+    last_name: str = ""
+    total_seconds: int = 0
+    total_pretty: str = "0s"
+    visit_count: int = 0
+    rank: int | None = None
+    ranked_players: int = 0
+    first_seen_at: str | None = None
+    last_seen_at: str | None = None
+    last_seen_pretty: str = "-"
+    online: bool = False
+
+
+class PlayerLeaderboardLinkedOut(BaseModel):
+    platform: str
+    external_id: str
+    net_id: str = ""
+    last_name: str = ""
+
+
+class PlayerLeaderboardRowOut(BaseModel):
+    """Aggregated player for the global / per-server leaderboard page."""
+
+    platform: str
+    external_id: str
+    # Raw net id as stored for the most recent row (for dossier / display).
+    net_id: str = ""
+    display_name: str = ""
+    # Primary total: overall when unfiltered, that server when filtered.
+    total_seconds: int = 0
+    total_pretty: str = "0s"
+    # Always the sum across every granted server (for context when filtered).
+    overall_seconds: int = 0
+    overall_pretty: str = "0s"
+    visit_count: int = 0
+    first_seen_at: str | None = None
+    last_seen_at: str | None = None
+    last_seen_pretty: str = "-"
+    online: bool = False
+    online_server_ids: list[int] = Field(default_factory=list)
+    online_server_names: list[str] = Field(default_factory=list)
+    rank: int | None = None
+    ranked_players: int = 0
+    linked_identities: list[PlayerLeaderboardLinkedOut] = Field(default_factory=list)
+    servers: list[PlayerLeaderboardServerOut] = Field(default_factory=list)
+
+
+class PlayerLeaderboardOut(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    ranked_players: int
+    server_id: int | None = None
+    q: str = ""
+    sort: str = "total_seconds"
+    order: str = "desc"
+    players: list[PlayerLeaderboardRowOut] = Field(default_factory=list)
+
+
 class ServerStatus(BaseModel):
     online: bool
     host: str
@@ -806,6 +871,20 @@ class PlayerNoteCreate(BaseModel):
     body: str = Field(default="", max_length=20000)
 
 
+class IdentityProfileOut(BaseModel):
+    """One platform account inside a (possibly linked) person dossier."""
+
+    platform: str
+    external_id: str
+    net_id: str = ""
+    display_name: str = ""
+    profile_url: str = ""
+    avatar_url: str = ""
+    has_info: bool = False
+    actions: list[PlayerActionLogOut] = Field(default_factory=list)
+    notes: list[PlayerNoteOut] = Field(default_factory=list)
+
+
 class IdentityDossierOut(BaseModel):
     platform: str
     external_id: str
@@ -813,8 +892,25 @@ class IdentityDossierOut(BaseModel):
     profile_url: str = ""
     avatar_url: str = ""
     has_info: bool = False
+    # Requested identity only (kept for older clients).
     actions: list[PlayerActionLogOut] = Field(default_factory=list)
     notes: list[PlayerNoteOut] = Field(default_factory=list)
+    # When set, this identity belongs to a multi-account person group.
+    link_group_id: int | None = None
+    # One section per linked platform account (requested identity first).
+    profiles: list[IdentityProfileOut] = Field(default_factory=list)
+
+
+class IdentityLinkRequest(BaseModel):
+    """Link another platform account to the identity in the URL path.
+
+    Provide either a raw ``net_id`` (SteamID64, ``gdk_…``, etc.) or an
+    explicit platform + external_id pair.
+    """
+
+    net_id: str = ""
+    platform: str = ""
+    external_id: str = ""
 
 
 class IdentityFlagsRequest(BaseModel):

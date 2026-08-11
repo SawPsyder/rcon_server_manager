@@ -109,6 +109,71 @@ export type PlayerInfo = {
   extra?: Record<string, string | number | boolean | null> | null;
 };
 
+/** One server's slice on the global Players leaderboard. */
+export type PlayerLeaderboardServer = {
+  server_id: number;
+  server_name: string;
+  server_type: string;
+  net_id: string;
+  last_name: string;
+  total_seconds: number;
+  total_pretty: string;
+  visit_count: number;
+  rank: number | null;
+  ranked_players: number;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  last_seen_pretty: string;
+  online: boolean;
+};
+
+export type PlayerLeaderboardLinked = {
+  platform: string;
+  external_id: string;
+  net_id: string;
+  last_name: string;
+};
+
+export type PlayerLeaderboardRow = {
+  platform: string;
+  external_id: string;
+  net_id: string;
+  display_name: string;
+  total_seconds: number;
+  total_pretty: string;
+  overall_seconds: number;
+  overall_pretty: string;
+  visit_count: number;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  last_seen_pretty: string;
+  online: boolean;
+  online_server_ids: number[];
+  online_server_names: string[];
+  rank: number | null;
+  ranked_players: number;
+  linked_identities?: PlayerLeaderboardLinked[];
+  servers: PlayerLeaderboardServer[];
+};
+
+export type PlayerLeaderboard = {
+  total: number;
+  page: number;
+  page_size: number;
+  ranked_players: number;
+  server_id: number | null;
+  q: string;
+  sort: string;
+  order: string;
+  players: PlayerLeaderboardRow[];
+};
+
+export type PlayerLeaderboardSort =
+  | "total_seconds"
+  | "last_seen_at"
+  | "name"
+  | "visit_count";
+
 export type ServerStatus = {
   online: boolean;
   host: string;
@@ -333,6 +398,18 @@ export type PlayerNote = {
   updated_at: string;
 };
 
+export type IdentityProfile = {
+  platform: string;
+  external_id: string;
+  net_id: string;
+  display_name: string;
+  profile_url: string;
+  avatar_url: string;
+  has_info: boolean;
+  actions: PlayerActionLog[];
+  notes: PlayerNote[];
+};
+
 export type IdentityDossier = {
   platform: string;
   external_id: string;
@@ -342,6 +419,8 @@ export type IdentityDossier = {
   has_info: boolean;
   actions: PlayerActionLog[];
   notes: PlayerNote[];
+  link_group_id?: number | null;
+  profiles?: IdentityProfile[];
 };
 
 /** Normalize net id to platform + external_id for identity APIs. */
@@ -997,6 +1076,24 @@ export const api = {
   },
 
   serverTypes: () => request<ServerTypeInfo[]>("/api/servers/types"),
+  listPlayers: (opts?: {
+    q?: string;
+    serverId?: number | null;
+    sort?: PlayerLeaderboardSort;
+    order?: "asc" | "desc";
+    page?: number;
+    pageSize?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (opts?.q) q.set("q", opts.q);
+    if (opts?.serverId != null) q.set("server_id", String(opts.serverId));
+    if (opts?.sort) q.set("sort", opts.sort);
+    if (opts?.order) q.set("order", opts.order);
+    if (opts?.page != null) q.set("page", String(opts.page));
+    if (opts?.pageSize != null) q.set("page_size", String(opts.pageSize));
+    const qs = q.toString();
+    return request<PlayerLeaderboard>(`/api/players${qs ? `?${qs}` : ""}`);
+  },
   listServers: () => request<Server[]>("/api/servers"),
   createServer: (data: {
     name: string;
@@ -1123,6 +1220,20 @@ export const api = {
   identityDossier: (platform: string, externalId: string) =>
     request<IdentityDossier>(
       `/api/identities/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}`
+    ),
+  linkIdentity: (
+    platform: string,
+    externalId: string,
+    body: { net_id?: string; platform?: string; external_id?: string },
+  ) =>
+    request<IdentityDossier>(
+      `/api/identities/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}/link`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  unlinkIdentity: (platform: string, externalId: string) =>
+    request<IdentityDossier>(
+      `/api/identities/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}/link`,
+      { method: "DELETE" },
     ),
   /** Upsert the caller's own note (empty body deletes only their note). */
   setIdentityNote: (platform: string, externalId: string, body: string) =>

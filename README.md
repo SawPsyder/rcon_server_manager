@@ -31,6 +31,7 @@ A self-hosted **web admin dashboard** for managing game servers from one place.
 - Player-weighted Sandstorm map popularity and toggle switch UI
 - Admin server schedules for Pterodactyl-linked containers (power, map, RCON) with player checks and retries
 - App timezone setting for schedule wall-clock times
+- Global Players leaderboard and multi-account identity linking
 <!-- FEATURES:END -->
 
 Game-specific admin tools (player control, map travel, saves, etc.) depend on the server type - see below.
@@ -49,6 +50,8 @@ Connects via **Source Query + RCON** (defaults: query `27131`, RCON `27015`).
 - Map / gamemode travel and quick commands
 - RCON console
 - Player history and playtime tracking
+- Global **Players** page: overall and per-server playtime ranks for everyone ever seen
+- Link multiple platform accounts (Steam / Xbox / PSN / …) as one person for ranking; dossier keeps notes and moderation history per account
 
 ### Satisfactory
 
