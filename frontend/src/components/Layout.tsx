@@ -19,6 +19,7 @@ export default function Layout() {
             Dashboard
           </NavLink>
           {isAdmin && <NavLink to="/servers">Servers</NavLink>}
+          {isAdmin && <NavLink to="/schedules">Schedules</NavLink>}
           {isAdmin && <NavLink to="/users">Users</NavLink>}
           <NavLink to="/settings">Settings</NavLink>
           <NavLink to="/account">

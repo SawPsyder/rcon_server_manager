@@ -539,3 +539,121 @@ class ServerBanEntry(Base):
     duration: Mapped[str] = mapped_column(String(128), default="")
     reason: Mapped[str] = mapped_column(Text, default="")
     permanent: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ServerSchedule(Base):
+    """Automated multi-step job for one Pterodactyl-linked game server.
+
+    ``time_local`` is wall-clock time in the global manager timezone
+    (``settings.app_timezone``), not a per-schedule or per-server zone.
+    """
+
+    __tablename__ = "server_schedules"
+    __table_args__ = (
+        Index("ix_server_schedules_next_run", "enabled", "next_run_at"),
+        Index("ix_server_schedules_server", "server_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # HH:MM in app timezone
+    time_local: Mapped[str] = mapped_column(String(5), nullable=False, default="04:00")
+    # Comma-separated weekdays Mon=0 … Sun=6; empty means every day
+    days_of_week: Mapped[str] = mapped_column(String(32), nullable=False, default="0,1,2,3,4,5,6")
+    retry_after_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    last_message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Window currently being retried (UTC). Null when idle between windows.
+    active_window_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Cooperative wait: next action index to run after a parked wait, or null.
+    resume_action_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Partial run detail while waiting mid-action-chain (checks + actions so far).
+    pending_detail_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    server: Mapped["Server"] = relationship()
+    actions: Mapped[list["ScheduleAction"]] = relationship(
+        back_populates="schedule",
+        cascade="all, delete-orphan",
+        order_by="ScheduleAction.sort_order",
+    )
+    checks: Mapped[list["ScheduleCheck"]] = relationship(
+        back_populates="schedule",
+        cascade="all, delete-orphan",
+        order_by="ScheduleCheck.sort_order",
+    )
+    # History must survive schedule delete (FK ON DELETE SET NULL). Do not use
+    # delete-orphan — that would wipe audit rows on ORM delete.
+    runs: Mapped[list["ScheduleRun"]] = relationship(
+        back_populates="schedule",
+        passive_deletes=True,
+    )
+
+
+class ScheduleAction(Base):
+    __tablename__ = "schedule_actions"
+    __table_args__ = (Index("ix_schedule_actions_schedule", "schedule_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    schedule_id: Mapped[int] = mapped_column(
+        ForeignKey("server_schedules.id", ondelete="CASCADE"), nullable=False
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    action_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    params_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    schedule: Mapped[ServerSchedule] = relationship(back_populates="actions")
+
+
+class ScheduleCheck(Base):
+    __tablename__ = "schedule_checks"
+    __table_args__ = (Index("ix_schedule_checks_schedule", "schedule_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    schedule_id: Mapped[int] = mapped_column(
+        ForeignKey("server_schedules.id", ondelete="CASCADE"), nullable=False
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    check_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    params_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    schedule: Mapped[ServerSchedule] = relationship(back_populates="checks")
+
+
+class ScheduleRun(Base):
+    """One attempt (or retry) of a schedule window."""
+
+    __tablename__ = "schedule_runs"
+    __table_args__ = (
+        Index("ix_schedule_runs_schedule_started", "schedule_id", "started_at"),
+        Index("ix_schedule_runs_server", "server_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    schedule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("server_schedules.id", ondelete="SET NULL"), nullable=True
+    )
+    server_id: Mapped[int | None] = mapped_column(
+        ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    detail_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    schedule: Mapped[ServerSchedule | None] = relationship(back_populates="runs")
+    server: Mapped["Server | None"] = relationship()

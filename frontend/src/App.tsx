@@ -11,6 +11,7 @@ import SettingsPage from "./pages/SettingsPage";
 import ServerMapPage from "./pages/ServerMapPage";
 import SharedChartPage from "./pages/SharedChartPage";
 import SharedMapPage from "./pages/SharedMapPage";
+import SchedulesPage from "./pages/SchedulesPage";
 import UsersPage from "./pages/UsersPage";
 
 function Loading() {
@@ -93,6 +94,14 @@ export default function App() {
           element={
             <AdminOnly>
               <UsersPage />
+            </AdminOnly>
+          }
+        />
+        <Route
+          path="schedules"
+          element={
+            <AdminOnly>
+              <SchedulesPage />
             </AdminOnly>
           }
         />

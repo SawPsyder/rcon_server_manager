@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # bcrypt truncates past 72 bytes, so a longer password would have a silently
@@ -914,6 +914,7 @@ class SettingsOut(BaseModel):
     query_timeout: float
     poll_interval_seconds: int
     stats_interval_seconds: int
+    app_timezone: str = "UTC"
     types: dict[str, TypeSettingsOut] = Field(default_factory=dict)
 
 
@@ -925,6 +926,7 @@ class SettingsUpdate(BaseModel):
     query_timeout: float | None = Field(default=None, ge=0.5, le=30)
     poll_interval_seconds: int | None = Field(default=None, ge=3, le=120)
     stats_interval_seconds: int | None = Field(default=None, ge=15, le=3600)
+    app_timezone: str | None = Field(default=None, max_length=64)
     types: dict[str, TypeSettingsUpdate] | None = None
 
 
@@ -943,3 +945,128 @@ class ClientIpDebugOut(BaseModel):
     socket_peer: str
     resolved_client_ip: str
     headers: list[ClientIpHeaderValue] = Field(default_factory=list)
+
+
+# ---- Server schedules ----
+
+class ScheduleActionIn(BaseModel):
+    action_type: str = Field(max_length=40)
+    params: dict[str, Any] = Field(default_factory=dict)
+    sort_order: int = 0
+
+
+class ScheduleCheckIn(BaseModel):
+    check_type: str = Field(max_length=40)
+    params: dict[str, Any] = Field(default_factory=dict)
+    sort_order: int = 0
+
+
+class ScheduleActionOut(BaseModel):
+    id: int | None = None
+    action_type: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    sort_order: int = 0
+
+
+class ScheduleCheckOut(BaseModel):
+    id: int | None = None
+    check_type: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    sort_order: int = 0
+
+
+class ScheduleCreate(BaseModel):
+    server_id: int
+    name: str = Field(min_length=1, max_length=120)
+    enabled: bool = True
+    time_local: str = Field(default="04:00", max_length=5)
+    days_of_week: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6])
+    # 0 = do not retry failed checks (skip until next window)
+    retry_after_minutes: int = Field(default=10, ge=0, le=24 * 60)
+    actions: list[ScheduleActionIn] = Field(min_length=1, max_length=50)
+    checks: list[ScheduleCheckIn] = Field(default_factory=list, max_length=20)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("name must not be blank")
+        return stripped
+
+
+class ScheduleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    enabled: bool | None = None
+    time_local: str | None = Field(default=None, max_length=5)
+    days_of_week: list[int] | None = None
+    retry_after_minutes: int | None = Field(default=None, ge=0, le=24 * 60)
+    actions: list[ScheduleActionIn] | None = Field(default=None, max_length=50)
+    checks: list[ScheduleCheckIn] | None = Field(default=None, max_length=20)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("name must not be blank")
+        return stripped
+
+    @field_validator("actions")
+    @classmethod
+    def actions_not_empty_when_set(
+        cls, value: list[ScheduleActionIn] | None
+    ) -> list[ScheduleActionIn] | None:
+        if value is not None and len(value) < 1:
+            raise ValueError("actions must include at least one step")
+        return value
+
+
+class ScheduleEnable(BaseModel):
+    enabled: bool
+
+
+class ScheduleOut(BaseModel):
+    id: int
+    server_id: int
+    server_name: str = ""
+    server_type: str = ""
+    pterodactyl_linked: bool = True
+    name: str
+    enabled: bool
+    time_local: str
+    days_of_week: list[int] = Field(default_factory=list)
+    retry_after_minutes: int
+    next_run_at: datetime
+    last_run_at: datetime | None = None
+    last_status: str = ""
+    last_message: str = ""
+    active_window_at: datetime | None = None
+    app_timezone: str = "UTC"
+    actions: list[ScheduleActionOut] = Field(default_factory=list)
+    checks: list[ScheduleCheckOut] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ScheduleRunOut(BaseModel):
+    id: int
+    schedule_id: int | None
+    server_id: int | None
+    schedule_name: str = ""
+    server_name: str = ""
+    scheduled_for: datetime
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    attempt: int
+    detail: dict[str, Any] = Field(default_factory=dict)
+    message: str = ""
+
+
+class ScheduleMetaOut(BaseModel):
+    app_timezone: str
+    action_types: list[dict[str, Any]] = Field(default_factory=list)
+    check_types: list[dict[str, Any]] = Field(default_factory=list)

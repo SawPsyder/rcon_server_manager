@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api, AppSettings } from "../api";
 import { useAuth } from "../auth";
 import ClientIpHelpersPanel from "../components/ClientIpHelpersPanel";
@@ -6,6 +6,54 @@ import MailSettingsPanel from "../components/MailSettingsPanel";
 import PterodactylSettingsPanel from "../components/PterodactylSettingsPanel";
 
 type Tab = "general" | "email" | "pterodactyl" | "helpers";
+
+/** Common IANA zones for the app schedule clock. Select (not free-text) so it
+ *  matches every other settings control and cannot fight the user mid-edit. */
+const APP_TIMEZONES = [
+  "UTC",
+  "Europe/Amsterdam",
+  "Europe/Berlin",
+  "Europe/Brussels",
+  "Europe/Dublin",
+  "Europe/Helsinki",
+  "Europe/Lisbon",
+  "Europe/London",
+  "Europe/Madrid",
+  "Europe/Moscow",
+  "Europe/Oslo",
+  "Europe/Paris",
+  "Europe/Prague",
+  "Europe/Rome",
+  "Europe/Stockholm",
+  "Europe/Vienna",
+  "Europe/Warsaw",
+  "Europe/Zurich",
+  "Africa/Cairo",
+  "Africa/Johannesburg",
+  "America/Anchorage",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Mexico_City",
+  "America/New_York",
+  "America/Sao_Paulo",
+  "America/Toronto",
+  "America/Vancouver",
+  "Asia/Bangkok",
+  "Asia/Dubai",
+  "Asia/Hong_Kong",
+  "Asia/Jakarta",
+  "Asia/Kolkata",
+  "Asia/Seoul",
+  "Asia/Shanghai",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Melbourne",
+  "Australia/Perth",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+  "Pacific/Honolulu",
+] as const;
 
 export default function SettingsPage() {
   // Everyone can read the general settings (the dashboard needs the poll
@@ -36,6 +84,15 @@ export default function SettingsPage() {
       setError(err instanceof Error ? err.message : "Failed");
     }
   };
+
+  const timezoneOptions = useMemo(() => {
+    const current = (settings?.app_timezone || "UTC").trim() || "UTC";
+    // Keep a stored value that is not in the curated list selectable.
+    if (APP_TIMEZONES.includes(current as (typeof APP_TIMEZONES)[number])) {
+      return [...APP_TIMEZONES];
+    }
+    return [current, ...APP_TIMEZONES];
+  }, [settings?.app_timezone]);
 
   if (!settings) {
     return <p className="muted">Loading settings…</p>;
@@ -135,6 +192,28 @@ export default function SettingsPage() {
                       })
                     }
                   />
+                </label>
+                <label className="full">
+                  App timezone
+                  <select
+                    value={settings.app_timezone || "UTC"}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        app_timezone: e.target.value,
+                      })
+                    }
+                  >
+                    {timezoneOptions.map((z) => (
+                      <option key={z} value={z}>
+                        {z}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="muted" style={{ fontSize: "0.85rem" }}>
+                    Used for all server schedules (e.g. 04:00 means 04:00 in this
+                    timezone).
+                  </span>
                 </label>
                 <div className="full">
                   <button className="btn primary">Save settings</button>

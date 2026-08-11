@@ -2141,6 +2141,834 @@ label.chip:has(input:disabled) {
   border-color: rgba(232, 162, 58, 0.85);
 }
 
+/* ── Schedules page ─────────────────────────────────────────────────────── */
+
+.schedules-page {
+  gap: 1.15rem;
+  /* Single control height for inputs, selects, small buttons, time, day chips. */
+  --schedules-control-h: 2.5rem;
+}
+
+/* Uniform control size across the schedules editor (and table actions). */
+.schedules-page input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.schedules-page select {
+  height: var(--schedules-control-h);
+  min-height: var(--schedules-control-h);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1.25;
+}
+
+.schedules-page .btn.small {
+  height: var(--schedules-control-h);
+  min-height: var(--schedules-control-h);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Header / card-head actions stay compact-ish but same height for consistency */
+.schedules-header .btn.small,
+.schedules-card-head .btn.small {
+  height: var(--schedules-control-h);
+}
+
+/* Page header */
+.schedules-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 0.85rem 1.25rem;
+  padding-bottom: 0.15rem;
+}
+
+.schedules-header-text {
+  min-width: 0;
+}
+
+.schedules-title {
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.schedules-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+}
+
+.schedules-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+}
+
+.schedules-stat strong {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* Card chrome shared by editor / list / history */
+.schedules-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.15rem;
+}
+
+/* Beat .card h2 (margin/font-size) so schedule cards keep their own hierarchy. */
+.card .schedules-card-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.schedules-card-hint {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+/* Empty states */
+.schedules-empty {
+  text-align: center;
+  padding: 2rem 1.25rem;
+}
+
+.schedules-empty-icon {
+  font-size: 1.75rem;
+  line-height: 1;
+  margin-bottom: 0.55rem;
+  opacity: 0.85;
+}
+
+.card .schedules-empty-title {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.schedules-empty-copy {
+  margin: 0 auto;
+  max-width: 28rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.schedules-empty-copy a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.schedules-list-empty {
+  padding: 1.35rem 0.25rem 0.5rem;
+}
+
+/* Editor form — sections divided by rules, not nested cards */
+.schedule-form {
+  gap: 0;
+  margin-top: 0.35rem;
+}
+
+.form-section {
+  padding: 1.15rem 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.form-section:first-of-type {
+  padding-top: 0.55rem;
+  border-top: 0;
+}
+
+.form-section-title {
+  margin: 0 0 0.8rem;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+
+.schedules-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.55rem 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.schedules-form-footer {
+  border-top: 1px solid var(--border);
+  padding-top: 1.1rem;
+}
+
+.schedules-field-label {
+  margin-bottom: 0.4rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+/* When: time + days */
+.schedules-when {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1rem 1.5rem;
+  align-items: start;
+}
+
+.schedules-when-time {
+  min-width: 0;
+}
+
+.schedules-when-days {
+  min-width: 0;
+}
+
+/* Day-of-week segmented control — snug tiles, outer corners only */
+.schedules-days {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  height: var(--schedules-control-h);
+  min-height: var(--schedules-control-h);
+  box-sizing: border-box;
+  background: #0f141c;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+
+.schedules-day {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  padding: 0 0.7rem;
+  border-radius: 0;
+  cursor: pointer;
+  min-width: 2.65rem;
+  height: 100%;
+  line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
+}
+
+/* Hairline between tiles (skip before first) */
+.schedules-day + .schedules-day {
+  box-shadow: inset 1px 0 0 var(--border);
+}
+
+.schedules-day:hover:not(:disabled):not(.is-active) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.schedules-day.is-active {
+  background: linear-gradient(135deg, rgba(232, 162, 58, 0.28), rgba(232, 162, 58, 0.16));
+  color: #ffd89a;
+}
+
+/* Quieter when every day is selected (all chips lit would look like decoration). */
+.schedules-days.is-every .schedules-day.is-active:not(.schedules-day-every) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+}
+
+.schedules-day-every {
+  min-width: auto;
+  padding-left: 0.8rem;
+  padding-right: 0.8rem;
+}
+
+.schedules-days.is-every .schedules-day-every.is-active {
+  background: linear-gradient(135deg, rgba(232, 162, 58, 0.28), rgba(232, 162, 58, 0.16));
+  color: #ffd89a;
+}
+
+/* Outer corners only: left on first, right on Sunday (last). */
+.schedules-day:first-child {
+  border-radius: 9px 0 0 9px;
+}
+
+.schedules-day:last-child {
+  border-radius: 0 9px 9px 0;
+}
+
+.schedules-day:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+.schedules-day:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.schedules-day-short {
+  display: none;
+}
+
+/* Retry block */
+.schedules-retry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+
+.schedules-retry-input {
+  max-width: 12rem;
+}
+
+/* Checks / actions list rows */
+.schedules-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.schedules-items-empty {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: rgba(15, 20, 28, 0.45);
+  font-size: 0.88rem;
+}
+
+.schedules-actions-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem 1rem;
+  text-align: left;
+}
+
+.schedules-actions-gate-title {
+  color: var(--text);
+  font-weight: 650;
+  font-size: 0.92rem;
+}
+
+.schedules-server-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+  max-width: 52rem;
+}
+
+.schedules-enabled {
+  display: flex;
+  align-items: center;
+  /* Same band as Server/Name inputs; parent row uses align-items: end. */
+  height: var(--schedules-control-h);
+  min-height: var(--schedules-control-h);
+}
+
+.schedule-row-check,
+.schedule-row-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8rem auto;
+  gap: 0.55rem;
+  align-items: end;
+}
+
+.schedule-row-action {
+  grid-template-columns: 1.7rem minmax(0, 1fr) 8rem auto;
+}
+
+.schedule-item-type {
+  min-width: 0;
+}
+
+.schedule-item-value {
+  width: 8rem;
+  max-width: 100%;
+}
+
+.schedule-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(15, 20, 28, 0.35);
+}
+
+.schedule-item-main {
+  width: 100%;
+}
+
+.schedule-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: flex-end;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.schedule-item-index {
+  flex: 0 0 auto;
+  width: 1.7rem;
+  height: var(--schedules-control-h);
+  min-height: var(--schedules-control-h);
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  align-self: flex-end;
+  border-radius: 8px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.schedule-item-grow {
+  flex: 1 1 10rem;
+  min-width: 8.5rem;
+}
+
+.schedule-item-narrow {
+  flex: 0 1 8.5rem;
+  min-width: 6.5rem;
+}
+
+.schedule-item-extra {
+  width: 100%;
+}
+
+.schedule-item-meta {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+/* Align action buttons with input controls (same label + control stack). */
+.field-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+.field-actions-label {
+  display: block;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  min-height: 1.45em;
+  visibility: hidden;
+  user-select: none;
+  pointer-events: none;
+}
+
+.field-actions-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  height: var(--schedules-control-h);
+  min-height: var(--schedules-control-h);
+}
+
+.schedule-form .form-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+/* Schedules table — sits on the page (not in .table-wrap) so row menus
+   can overflow without forcing a nested scroll container. */
+.schedules-table {
+  margin-top: 0.15rem;
+}
+
+.schedules-table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.schedules-table td {
+  vertical-align: top;
+  padding-top: 0.7rem;
+  padding-bottom: 0.7rem;
+}
+
+.schedules-table tbody tr.is-editing {
+  background: rgba(232, 162, 58, 0.06);
+}
+
+.schedules-table .col-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.schedules-name-cell {
+  min-width: 8rem;
+}
+
+.schedules-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
+}
+
+.schedules-name {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.schedules-name-row .pill {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+}
+
+.schedules-warn {
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--danger);
+}
+
+.schedules-server {
+  font-weight: 550;
+}
+
+.schedules-type {
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+}
+
+.schedules-when-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 5.5rem;
+}
+
+.schedules-time {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.schedules-days-text {
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+.schedules-last .pill,
+.schedules-table .pill {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  text-transform: capitalize;
+}
+
+.schedules-row-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.schedules-menu {
+  position: relative;
+}
+
+.schedules-menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 40;
+  min-width: 9.5rem;
+  padding: 0.3rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.schedules-menu-panel button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 550;
+  padding: 0.45rem 0.6rem;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.schedules-menu-panel button:hover:not(:disabled) {
+  background: var(--bg-elev-2);
+}
+
+.schedules-menu-panel button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.schedules-menu-panel button.is-danger {
+  color: #ffb4b8;
+}
+
+/* History */
+.schedules-history-table tbody tr {
+  cursor: default;
+}
+
+.schedules-history-table tbody tr:hover {
+  background: transparent;
+}
+
+.schedules-attempt {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.schedules-run-msg {
+  max-width: 28rem;
+  word-break: break-word;
+  font-size: 0.88rem;
+}
+
+.schedules-history-filter {
+  min-width: 12rem;
+}
+
+/* History sits flat on the page (same as the schedules table). */
+.schedules-history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.schedules-history-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 0.75rem;
+}
+
+/* Schedule time picker — dual selects, matches form chrome. */
+.time-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  max-width: 28rem;
+}
+
+.time-picker.is-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.time-picker-shell {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+  height: var(--schedules-control-h, 2.5rem);
+  min-height: var(--schedules-control-h, 2.5rem);
+  box-sizing: border-box;
+  background: #0f141c;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.time-picker-shell:focus-within {
+  outline: 2px solid rgba(232, 162, 58, 0.35);
+  border-color: var(--accent);
+}
+
+/* Override the schedules-page select height rules for the bare selects inside. */
+.schedules-page .time-picker-part,
+.time-picker-part {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 100%;
+  min-height: 0;
+  background-color: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: 0.04em;
+  padding: 0 1.55rem 0 0.65rem;
+  cursor: pointer;
+  line-height: 1.2;
+  /* Custom chevron so it matches the dark shell on every OS. */
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(50% - 2px),
+    calc(100% - 9px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  min-width: 4.25rem;
+}
+
+.time-picker-part:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.time-picker-part:focus {
+  outline: none;
+  background-color: rgba(232, 162, 58, 0.08);
+}
+
+.time-picker-part option {
+  background: #151b24;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.time-picker-sep {
+  display: inline-flex;
+  align-items: center;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  padding: 0 0.05rem;
+  user-select: none;
+  opacity: 0.9;
+  flex: 0 0 auto;
+}
+
+.time-picker-hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 900px) {
+  .schedules-when {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .schedules-server-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .schedules-enabled {
+    grid-column: 1 / -1;
+    height: auto;
+    min-height: var(--schedules-control-h);
+  }
+
+  .schedule-row-check,
+  .schedule-row-action {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-row-action {
+    grid-template-columns: 1.7rem 1fr;
+  }
+
+  .schedule-item-value {
+    width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .schedule-form .form-grid-3 {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .schedules-server-row {
+    grid-template-columns: 1fr;
+  }
+
+  .schedules-header {
+    align-items: flex-start;
+  }
+
+  .schedules-day {
+    min-width: 2.25rem;
+    padding: 0.48rem 0.45rem;
+  }
+
+  .schedules-day-full {
+    display: none;
+  }
+
+  .schedules-day-short {
+    display: inline;
+  }
+
+  .schedules-day-every .schedules-day-full {
+    display: inline;
+  }
+
+  .schedules-row-actions {
+    justify-content: flex-start;
+  }
+
+  .schedules-table .col-actions {
+    white-space: normal;
+  }
+}
+
 .map-pop-bar {
   height: 0.55rem;
   border-radius: 3px;
