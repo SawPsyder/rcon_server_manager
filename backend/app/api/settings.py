@@ -12,6 +12,7 @@ from app.schemas import (
     SettingsUpdate,
     TypeSettingsOut,
 )
+from app.services.schedule_time import DEFAULT_APP_TIMEZONE, validate_timezone_name
 from app.server_types import get_adapter, list_adapters, list_server_types
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -72,6 +73,7 @@ def get_settings_api(db: Session = Depends(get_db)) -> SettingsOut:
         query_timeout=float(_get(db, "query_timeout", "2.0")),
         poll_interval_seconds=int(_get(db, "poll_interval_seconds", "10")),
         stats_interval_seconds=int(_get(db, "stats_interval_seconds", "60")),
+        app_timezone=_get(db, "app_timezone", DEFAULT_APP_TIMEZONE) or DEFAULT_APP_TIMEZONE,
         types=_type_settings(db),
     )
 
@@ -88,6 +90,16 @@ def update_settings(
         _set(db, "poll_interval_seconds", str(body.poll_interval_seconds))
     if body.stats_interval_seconds is not None:
         _set(db, "stats_interval_seconds", str(body.stats_interval_seconds))
+    timezone_changed = False
+    if body.app_timezone is not None:
+        try:
+            tz = validate_timezone_name(body.app_timezone)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        prev = _get(db, "app_timezone", DEFAULT_APP_TIMEZONE)
+        if prev != tz:
+            timezone_changed = True
+        _set(db, "app_timezone", tz)
     if body.types:
         known = {t.id for t in list_server_types()}
         for type_id, ts in body.types.items():
@@ -96,6 +108,11 @@ def update_settings(
             if ts.preferred_gamemode is not None:
                 _set(db, _type_preferred_key(type_id), ts.preferred_gamemode.strip())
     db.commit()
+    if timezone_changed:
+        # Import lazily so settings still load if schedule tables are mid-migrate.
+        from app.services.schedule_runner import recompute_all_next_runs
+
+        recompute_all_next_runs(db)
     return get_settings_api(db)
 
 

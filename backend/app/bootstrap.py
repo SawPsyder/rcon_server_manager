@@ -14,6 +14,8 @@ DEFAULT_SETTINGS = {
     "query_timeout": "2.0",
     "poll_interval_seconds": "10",
     "stats_interval_seconds": "60",
+    # Wall clock for all schedules (not per game server). IANA name.
+    "app_timezone": "UTC",
 }
 
 

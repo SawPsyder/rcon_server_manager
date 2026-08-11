@@ -383,6 +383,129 @@ def run_migrations(engine: Engine) -> None:
 
     _renormalize_unknown_identities(engine)
 
+
+    # server schedules (Pterodactyl-linked automation)
+    if not _table_exists(engine, "server_schedules"):
+        if dialect == "postgresql":
+            ddl = """
+            CREATE TABLE server_schedules (
+                id SERIAL PRIMARY KEY,
+                server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                name VARCHAR(120) NOT NULL DEFAULT '',
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                time_local VARCHAR(5) NOT NULL DEFAULT '04:00',
+                days_of_week VARCHAR(32) NOT NULL DEFAULT '0,1,2,3,4,5,6',
+                retry_after_minutes INTEGER NOT NULL DEFAULT 10,
+                next_run_at TIMESTAMPTZ NOT NULL,
+                last_run_at TIMESTAMPTZ,
+                last_status VARCHAR(32) NOT NULL DEFAULT '',
+                last_message TEXT NOT NULL DEFAULT '',
+                active_window_at TIMESTAMPTZ,
+                resume_action_index INTEGER,
+                pending_detail_json TEXT NOT NULL DEFAULT '{}',
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            );
+            CREATE INDEX ix_server_schedules_server ON server_schedules (server_id);
+            CREATE INDEX ix_server_schedules_next_run ON server_schedules (enabled, next_run_at);
+            CREATE TABLE schedule_actions (
+                id SERIAL PRIMARY KEY,
+                schedule_id INTEGER NOT NULL REFERENCES server_schedules(id) ON DELETE CASCADE,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                action_type VARCHAR(40) NOT NULL,
+                params_json TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX ix_schedule_actions_schedule ON schedule_actions (schedule_id);
+            CREATE TABLE schedule_checks (
+                id SERIAL PRIMARY KEY,
+                schedule_id INTEGER NOT NULL REFERENCES server_schedules(id) ON DELETE CASCADE,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                check_type VARCHAR(40) NOT NULL,
+                params_json TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX ix_schedule_checks_schedule ON schedule_checks (schedule_id);
+            CREATE TABLE schedule_runs (
+                id SERIAL PRIMARY KEY,
+                schedule_id INTEGER REFERENCES server_schedules(id) ON DELETE SET NULL,
+                server_id INTEGER REFERENCES servers(id) ON DELETE SET NULL,
+                scheduled_for TIMESTAMPTZ NOT NULL,
+                started_at TIMESTAMPTZ NOT NULL,
+                finished_at TIMESTAMPTZ,
+                status VARCHAR(32) NOT NULL DEFAULT '',
+                attempt INTEGER NOT NULL DEFAULT 1,
+                detail_json TEXT NOT NULL DEFAULT '{}',
+                message TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX ix_schedule_runs_schedule_started ON schedule_runs (schedule_id, started_at);
+            CREATE INDEX ix_schedule_runs_server ON schedule_runs (server_id);
+            """
+        else:
+            ddl = """
+            CREATE TABLE server_schedules (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                name VARCHAR(120) NOT NULL DEFAULT '',
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                time_local VARCHAR(5) NOT NULL DEFAULT '04:00',
+                days_of_week VARCHAR(32) NOT NULL DEFAULT '0,1,2,3,4,5,6',
+                retry_after_minutes INTEGER NOT NULL DEFAULT 10,
+                next_run_at DATETIME NOT NULL,
+                last_run_at DATETIME,
+                last_status VARCHAR(32) NOT NULL DEFAULT '',
+                last_message TEXT NOT NULL DEFAULT '',
+                active_window_at DATETIME,
+                resume_action_index INTEGER,
+                pending_detail_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            );
+            CREATE INDEX ix_server_schedules_server ON server_schedules (server_id);
+            CREATE INDEX ix_server_schedules_next_run ON server_schedules (enabled, next_run_at);
+            CREATE TABLE schedule_actions (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                schedule_id INTEGER NOT NULL REFERENCES server_schedules(id) ON DELETE CASCADE,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                action_type VARCHAR(40) NOT NULL,
+                params_json TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX ix_schedule_actions_schedule ON schedule_actions (schedule_id);
+            CREATE TABLE schedule_checks (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                schedule_id INTEGER NOT NULL REFERENCES server_schedules(id) ON DELETE CASCADE,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                check_type VARCHAR(40) NOT NULL,
+                params_json TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX ix_schedule_checks_schedule ON schedule_checks (schedule_id);
+            CREATE TABLE schedule_runs (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                schedule_id INTEGER REFERENCES server_schedules(id) ON DELETE SET NULL,
+                server_id INTEGER REFERENCES servers(id) ON DELETE SET NULL,
+                scheduled_for DATETIME NOT NULL,
+                started_at DATETIME NOT NULL,
+                finished_at DATETIME,
+                status VARCHAR(32) NOT NULL DEFAULT '',
+                attempt INTEGER NOT NULL DEFAULT 1,
+                detail_json TEXT NOT NULL DEFAULT '{}',
+                message TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX ix_schedule_runs_schedule_started ON schedule_runs (schedule_id, started_at);
+            CREATE INDEX ix_schedule_runs_server ON schedule_runs (server_id);
+            """
+        with engine.begin() as conn:
+            for stmt in ddl.strip().split(";"):
+                s = stmt.strip()
+                if s:
+                    conn.execute(text(s))
+        logger.info("Created schedule tables (%s)", dialect)
+
+    # Cooperative wait cursor + partial detail (existing installs)
+    if _table_exists(engine, "server_schedules"):
+        _add_column(engine, "server_schedules", "resume_action_index INTEGER")
+        _add_column(
+            engine, "server_schedules", "pending_detail_json TEXT DEFAULT '{}'"
+        )
+
     # migrate legacy preferred_gamemode setting → type default key
     if _table_exists(engine, "settings"):
         with engine.begin() as conn:

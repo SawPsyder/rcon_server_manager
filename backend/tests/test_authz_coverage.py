@@ -124,7 +124,17 @@ def test_connection_settings_routes_are_admin_only():
     assert not missing, f"Expected these routes to exist: {sorted(missing)}"
 
 
+def test_schedule_routes_are_admin_only():
+    for route in _api_routes():
+        if not route.path.startswith("/api/schedules"):
+            continue
+        assert require_admin in _dependency_calls(route.dependant), (
+            f"{sorted(route.methods)} {route.path} is not admin-only"
+        )
+
+
 def test_user_administration_is_admin_only():
+
     for route in _api_routes():
         if not route.path.startswith("/api/users"):
             continue

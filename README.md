@@ -29,6 +29,8 @@ A self-hosted **web admin dashboard** for managing game servers from one place.
 - Cross-chart history hover sync (span-aware across player, tick, and container load)
 - Pterodactyl startup vars and Sandstorm set-default-map
 - Player-weighted Sandstorm map popularity and toggle switch UI
+- Admin server schedules for Pterodactyl-linked containers (power, map, RCON) with player checks and retries
+- App timezone setting for schedule wall-clock times
 <!-- FEATURES:END -->
 
 Game-specific admin tools (player control, map travel, saves, etc.) depend on the server type - see below.

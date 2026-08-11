@@ -389,6 +389,7 @@ export type AppSettings = {
   query_timeout: number;
   poll_interval_seconds: number;
   stats_interval_seconds: number;
+  app_timezone: string;
   types: Record<string, TypeSettings>;
 };
 
@@ -736,6 +737,89 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+
+export type ScheduleAction = {
+  id?: number | null;
+  action_type: string;
+  params: Record<string, unknown>;
+  sort_order: number;
+};
+
+export type ScheduleCheck = {
+  id?: number | null;
+  check_type: string;
+  params: Record<string, unknown>;
+  sort_order: number;
+};
+
+export type Schedule = {
+  id: number;
+  server_id: number;
+  server_name: string;
+  server_type: string;
+  pterodactyl_linked: boolean;
+  name: string;
+  enabled: boolean;
+  time_local: string;
+  days_of_week: number[];
+  retry_after_minutes: number;
+  next_run_at: string;
+  last_run_at: string | null;
+  last_status: string;
+  last_message: string;
+  active_window_at: string | null;
+  app_timezone: string;
+  actions: ScheduleAction[];
+  checks: ScheduleCheck[];
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type ScheduleRun = {
+  id: number;
+  schedule_id: number | null;
+  server_id: number | null;
+  schedule_name?: string;
+  server_name?: string;
+  scheduled_for: string;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  attempt: number;
+  detail: Record<string, unknown>;
+  message: string;
+};
+
+export type ScheduleMeta = {
+  app_timezone: string;
+  action_types: {
+    id: string;
+    label: string;
+    params: string[];
+    server_types?: string[];
+  }[];
+  check_types: { id: string; label: string; params: string[] }[];
+};
+
+export type ScheduleCreate = {
+  server_id: number;
+  name: string;
+  enabled?: boolean;
+  time_local: string;
+  days_of_week: number[];
+  retry_after_minutes: number;
+  actions: {
+    action_type: string;
+    params?: Record<string, unknown>;
+    sort_order?: number;
+  }[];
+  checks: {
+    check_type: string;
+    params?: Record<string, unknown>;
+    sort_order?: number;
+  }[];
+};
+
 export const api = {
   authConfig: () => request<PublicConfig>("/api/auth/config"),
   authStatus: () => request<AuthStatus>("/api/auth/status"),
@@ -1079,6 +1163,47 @@ export const api = {
         ? `/api/gamemode-labels?server_type=${encodeURIComponent(serverType)}`
         : "/api/gamemode-labels"
     ),
+  schedules: {
+    meta: () => request<ScheduleMeta>("/api/schedules/meta"),
+    list: (serverId?: number) =>
+      request<Schedule[]>(
+        serverId != null
+          ? `/api/schedules?server_id=${serverId}`
+          : "/api/schedules"
+      ),
+    get: (id: number) => request<Schedule>(`/api/schedules/${id}`),
+    create: (data: ScheduleCreate) =>
+      request<Schedule>("/api/schedules", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (
+      id: number,
+      data: Partial<ScheduleCreate> & { enabled?: boolean }
+    ) =>
+      request<Schedule>(`/api/schedules/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    enable: (id: number, enabled: boolean) =>
+      request<Schedule>(`/api/schedules/${id}/enable`, {
+        method: "POST",
+        body: JSON.stringify({ enabled }),
+      }),
+    remove: (id: number) =>
+      request<{ ok: boolean }>(`/api/schedules/${id}`, { method: "DELETE" }),
+    runs: (id: number, limit = 50) =>
+      request<ScheduleRun[]>(`/api/schedules/${id}/runs?limit=${limit}`),
+    /** Merged history across all schedules (optional schedule filter). */
+    allRuns: (opts?: { limit?: number; scheduleId?: number }) => {
+      const q = new URLSearchParams();
+      q.set("limit", String(opts?.limit ?? 100));
+      if (opts?.scheduleId != null) q.set("schedule_id", String(opts.scheduleId));
+      return request<ScheduleRun[]>(`/api/schedules/runs?${q.toString()}`);
+    },
+    runNow: (id: number) =>
+      request<Schedule>(`/api/schedules/${id}/run-now`, { method: "POST" }),
+  },
   settings: () => request<AppSettings>("/api/settings"),
   updateSettings: (data: Partial<AppSettings>) =>
     request<AppSettings>("/api/settings", {
