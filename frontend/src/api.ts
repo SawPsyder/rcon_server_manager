@@ -6,6 +6,8 @@ export type ServerFeatures = {
   kick_ban: boolean;
   /** Timed (duration-based) bans. Off for games where every ban is permanent (e.g. Palworld). */
   timed_ban: boolean;
+  /** Permanent ban + unban exist. Off for games that can kick but not ban (Dune). */
+  perm_ban: boolean;
   /** The transport can enumerate existing bans (Palworld can ban but not list). */
   ban_list: boolean;
   admin_say: boolean;
@@ -320,6 +322,91 @@ export type PalworldWorld = {
 export type PalworldAction = {
   ok: boolean;
   detail: string;
+};
+
+export type DuneAction = {
+  ok: boolean;
+  detail: string;
+  restart_required: boolean;
+  requires_confirmation: boolean;
+  players: number | null;
+  applied: string[];
+  errors: { id: string; error: string }[];
+};
+
+export type DuneStatusMap = {
+  map: string;
+  status?: string;
+  desired?: number;
+  current?: number;
+  players: number;
+};
+
+export type DuneStatusGrid = {
+  ok: boolean;
+  maps: DuneStatusMap[];
+  totalServers?: number;
+  totalPlayers?: number;
+  uptimeSeconds?: number;
+  warning?: string;
+  pool?: { size?: number; used?: number; free?: number };
+  sources?: { mockK8s?: boolean; playerCounts?: boolean };
+};
+
+export type DunePartition = {
+  partition_id: number;
+  map: string;
+  dimension: number;
+  label: string;
+  blocked: boolean;
+  server_id: string | null;
+  game_port: number | null;
+  ready: boolean;
+  alive: boolean;
+  players: number;
+  parked?: boolean;
+};
+
+export type DuneSettingItem = {
+  id: string;
+  label: string;
+  type: string;
+  default: string | null;
+  enum: string[] | null;
+  value: string | null;
+  isDefault: boolean;
+  verified: boolean;
+  section: string | null;
+  key: string;
+  clientGated: boolean;
+  advanced: boolean;
+};
+
+export type DuneSettings = {
+  ok: boolean;
+  count: number;
+  categories: Record<string, DuneSettingItem[]>;
+  note?: string;
+};
+
+export type DuneMapMarker = {
+  id: string;
+  name: string;
+  online: boolean;
+  partition: number;
+  fls: string;
+  x: number;
+  y: number;
+  z: number;
+  kind: string;
+};
+
+export type DuneMapLocation = {
+  name: string;
+  map: string;
+  x: number;
+  y: number;
+  z: number;
 };
 
 export type MapConfig = {
@@ -1446,6 +1533,77 @@ export const api = {
       request<PalworldAction>(`/api/servers/${id}/palworld/stop`, {
         method: "POST",
         body: JSON.stringify({ confirm: true }),
+      }),
+  },
+
+  /** Dune Awakening egg admin-HTTP passthrough. */
+  dune: {
+    status: (id: number) => request<DuneStatusGrid>(`/api/servers/${id}/dune/status`),
+    partitions: (id: number) =>
+      request<{ ok: boolean; partitions?: DunePartition[]; error?: string }>(
+        `/api/servers/${id}/dune/partitions`
+      ),
+    settings: (id: number) => request<DuneSettings>(`/api/servers/${id}/dune/settings`),
+    saveSettings: (id: number, settings: Record<string, string>) =>
+      request<DuneAction>(`/api/servers/${id}/dune/settings`, {
+        method: "POST",
+        body: JSON.stringify({ settings }),
+      }),
+    markers: (id: number, map: string) =>
+      request<{ ok: boolean; map: string; markers: DuneMapMarker[]; available?: boolean }>(
+        `/api/servers/${id}/dune/map/markers?map=${encodeURIComponent(map)}`
+      ),
+    locations: (id: number) =>
+      request<{ ok: boolean; locations: DuneMapLocation[] }>(
+        `/api/servers/${id}/dune/map/locations`
+      ),
+    addLocation: (id: number, location: DuneMapLocation) =>
+      request<{ ok: boolean; locations: DuneMapLocation[] }>(
+        `/api/servers/${id}/dune/map/locations`,
+        { method: "POST", body: JSON.stringify({ action: "add", location }) }
+      ),
+    removeLocation: (id: number, name: string) =>
+      request<{ ok: boolean; locations: DuneMapLocation[] }>(
+        `/api/servers/${id}/dune/map/locations`,
+        { method: "POST", body: JSON.stringify({ action: "remove", name }) }
+      ),
+    teleport: (id: number, player: string, location: string) =>
+      request<DuneAction>(`/api/servers/${id}/dune/map/teleport`, {
+        method: "POST",
+        body: JSON.stringify({ player, location }),
+      }),
+    scale: (id: number, map: string, replicas: number, force = false) =>
+      request<DuneAction>(
+        `/api/servers/${id}/dune/instances/${encodeURIComponent(map)}/scale`,
+        { method: "POST", body: JSON.stringify({ replicas, force }) }
+      ),
+    dimensionUp: (id: number, partitionId: number) =>
+      request<DuneAction>(`/api/servers/${id}/dune/instances/dimension/${partitionId}/up`, {
+        method: "POST",
+      }),
+    dimensionDown: (id: number, partitionId: number, force = false) =>
+      request<DuneAction>(`/api/servers/${id}/dune/instances/dimension/${partitionId}/down`, {
+        method: "POST",
+        body: JSON.stringify({ force }),
+      }),
+    addSietch: (id: number, label = "") =>
+      request<DuneAction>(`/api/servers/${id}/dune/sietches`, {
+        method: "POST",
+        body: JSON.stringify({ label }),
+      }),
+    parkSietch: (id: number, partitionId: number, force = false) =>
+      request<DuneAction>(`/api/servers/${id}/dune/sietches/${partitionId}/park`, {
+        method: "POST",
+        body: JSON.stringify({ force }),
+      }),
+    unparkSietch: (id: number, partitionId: number) =>
+      request<DuneAction>(`/api/servers/${id}/dune/sietches/${partitionId}/unpark`, {
+        method: "POST",
+      }),
+    removeSietch: (id: number, partitionId: number, force = false) =>
+      request<DuneAction>(`/api/servers/${id}/dune/sietches/${partitionId}/remove`, {
+        method: "POST",
+        body: JSON.stringify({ force }),
       }),
   },
 };

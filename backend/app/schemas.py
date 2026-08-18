@@ -365,6 +365,7 @@ class ServerFeaturesOut(BaseModel):
     player_score: bool = True
     kick_ban: bool = False
     timed_ban: bool = False
+    perm_ban: bool = True
     ban_list: bool = False
     admin_say: bool = False
     a2s_query: bool = True
@@ -810,6 +811,58 @@ class PalworldShutdownRequest(BaseModel):
     waittime: int = Field(default=30, ge=0, le=3600)
     message: str = Field(default="", max_length=1000)
     confirm: bool = False
+
+
+class DuneActionOut(BaseModel):
+    ok: bool = True
+    detail: str = ""
+    restart_required: bool = False
+    requires_confirmation: bool = False
+    players: int | None = None
+    applied: list[str] = Field(default_factory=list)
+    errors: list[dict[str, str]] = Field(default_factory=list)
+
+
+class DuneBroadcastRequest(BaseModel):
+    title: str = Field(default="Broadcast", max_length=120)
+    body: str = Field(min_length=1, max_length=1000)
+    duration: int = Field(default=30, ge=1, le=600)
+
+
+class DuneSettingsUpdate(BaseModel):
+    settings: dict[str, str] = Field(min_length=1)
+
+
+class DuneLocationIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    map: str = Field(min_length=1, max_length=32)
+    x: float
+    y: float
+    z: float = 0
+
+
+class DuneLocationAction(BaseModel):
+    action: str = Field(min_length=1, max_length=16)
+    location: DuneLocationIn | None = None
+    name: str = ""
+
+
+class DuneTeleportRequest(BaseModel):
+    player: str = Field(min_length=1, max_length=64)
+    location: str = Field(min_length=1, max_length=80)
+
+
+class DuneScaleRequest(BaseModel):
+    replicas: int = Field(ge=0, le=8)
+    force: bool = False
+
+
+class DuneForceRequest(BaseModel):
+    force: bool = False
+
+
+class DuneSietchCreate(BaseModel):
+    label: str = Field(default="", max_length=64)
 
 
 class RconCommandRequest(BaseModel):

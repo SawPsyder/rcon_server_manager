@@ -31,6 +31,9 @@ class ServerFeatures:
     # Timed (duration-based) bans. Off for games like Palworld where every ban
     # is permanent and the transport has no duration parameter.
     timed_ban: bool = False
+    # Permanent ban + unban exist. Off for games like Dune that can kick but
+    # have no ban command at all. Defaults on so Sandstorm/Palworld stay as-is.
+    perm_ban: bool = True
     # The transport can enumerate existing bans. Separate from kick_ban: Palworld
     # can ban but keeps its ban list in a file the REST API never exposes.
     ban_list: bool = False

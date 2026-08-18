@@ -16,7 +16,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, IdentityCache, PlayerServerStats
-from app.services.identity import parse_net_id
+from app.services.identity import parse_net_id, parse_steam_community_xml, remember_identity
 from app.services.player_records import normalize_identity
 from app.services.presence import enrich_player_list, update_presence
 
@@ -290,3 +290,45 @@ def test_a_read_but_empty_roster_closes_the_session(db):
     row = db.query(PlayerServerStats).one()
     assert row.visit_count == 2
     assert row.previous_seen_at is not None
+
+
+def test_parse_steam_community_xml_reads_persona():
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        "<profile>"
+        "<steamID64>76561198067446355</steamID64>"
+        "<steamID><![CDATA[JayMatthew]]></steamID>"
+        "<avatarFull>https://example.test/avatar.jpg</avatarFull>"
+        "</profile>"
+    )
+    info = parse_steam_community_xml(xml, "76561198067446355")
+    assert info is not None
+    assert info["display_name"] == "JayMatthew"
+    assert info["avatar_url"] == "https://example.test/avatar.jpg"
+
+
+def test_parse_steam_community_xml_rejects_garbage():
+    assert parse_steam_community_xml("not xml", "76561198067446355") is None
+    assert parse_steam_community_xml("<profile></profile>", "76561198067446355") is None
+
+
+def test_presence_does_not_clobber_a_resolved_steam_persona(db):
+    remember_identity(
+        db,
+        platform="steam",
+        external_id=STEAM,
+        display_name="JayMatthew",
+        source="steam_community",
+        commit=True,
+    )
+    remember_identity(
+        db,
+        platform="steam",
+        external_id=STEAM,
+        display_name="Jay",
+        source="presence",
+        commit=True,
+    )
+    row = db.query(IdentityCache).filter(IdentityCache.external_id == STEAM).one()
+    assert row.display_name == "JayMatthew"
+    assert row.source == "steam_community"

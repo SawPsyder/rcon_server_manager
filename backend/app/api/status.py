@@ -78,6 +78,10 @@ def server_status(
 
     player_source = snap.get("player_list") or raw.get("player_list") or []
     enriched = enrich_player_list(db, server.id, list(player_source))
+    if st == "dune" and enriched:
+        from app.server_types.dune import enrich_dune_roster
+
+        enrich_dune_roster(db, enriched)
 
     players_count = snap.get("players")
     if players_count is None:

@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api import (
     auth,
     chart_share,
+    dune,
     identities,
     mail,
     map_share,
@@ -76,6 +77,7 @@ app.include_router(identities.router, dependencies=AUTHED)
 app.include_router(player_leaderboard.router, dependencies=AUTHED)
 app.include_router(satisfactory.router, dependencies=SCOPED)
 app.include_router(palworld.router, dependencies=SCOPED)
+app.include_router(dune.router, dependencies=SCOPED)
 app.include_router(server_pterodactyl.router, dependencies=SCOPED)
 
 
@@ -100,6 +102,7 @@ def on_shutdown() -> None:
     collector.stop()
     pterodactyl_poller.stop()
     schedule_runner.stop()
+    from app.services.dune_api import dune_pool
     from app.services.palworld_api import palworld_pool
     from app.services.pterodactyl_api import panel_registry
     from app.services.rcon_pool import rcon_pool
@@ -108,12 +111,14 @@ def on_shutdown() -> None:
     rcon_pool.invalidate_all()
     satisfactory_pool.invalidate_all()
     palworld_pool.invalidate_all()
+    dune_pool.invalidate_all()
     panel_registry.invalidate_all()
 
 
 @app.get("/api/health")
 def health() -> dict:
     from app.config import get_settings
+    from app.services.dune_api import dune_pool
     from app.services.palworld_api import palworld_pool
     from app.services.pterodactyl_api import panel_registry
     from app.services.rcon_pool import rcon_pool
@@ -126,6 +131,7 @@ def health() -> dict:
         "rcon_sessions": rcon_pool.stats(),
         "api_sessions": satisfactory_pool.stats(),
         "palworld_sessions": palworld_pool.stats(),
+        "dune_sessions": dune_pool.stats(),
         "pterodactyl_sessions": panel_registry.stats(),
     }
 

@@ -1,0 +1,12 @@
+Dune: Awakening admin map images
+================================
+
+hagga-basin.webp, deepdesert.webp, arrakeen.webp, harko.webp
+
+Sourced from the Sergentval pelican-egg-dune-awakening admin SPA
+(https://github.com/Sergentval/pelican-egg-dune-awakening), which
+lifted them from Icehunter/dune-admin (MIT). World-coordinate frames live
+in frontend/src/lib/duneMapCoords.ts and must change with the images.
+
+Dune: Awakening is copyright Funcom. These images are bundled only so
+operators can place last-saved player positions on the in-game maps.

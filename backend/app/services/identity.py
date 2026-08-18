@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any
 
@@ -487,18 +488,96 @@ def _upsert_cache(
         )
         return
 
+    incoming = source or ""
+    # Presence only knows the in-game name. Never let it replace a Steam
+    # persona we already resolved from the Web API or a public profile.
+    persona_sources = {"steam_api", "steam_community"}
+    if row.source in persona_sources and incoming not in persona_sources:
+        row.updated_at = _utcnow()
+        return
+
     if display_name:
         row.display_name = display_name
     if profile_url:
         row.profile_url = profile_url
     if avatar_url:
         row.avatar_url = avatar_url
-    if source:
-        if source == "steam_api" or row.source != "steam_api":
-            row.source = source
+    if incoming:
+        if incoming == "steam_api" or row.source != "steam_api":
+            row.source = incoming
     row.updated_at = _utcnow()
 
 
 def steam_api_configured() -> bool:
     s = get_settings()
     return bool(_normalize_api_key(s.steam_web_api_key or s.steam_api_key))
+
+
+def parse_steam_community_xml(text: str, steam_id: str) -> dict[str, Any] | None:
+    """Public profile XML → persona dict, or ``None`` when the name is missing."""
+    raw = (text or "").lstrip()
+    if not raw or not raw.startswith("<"):
+        return None
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return None
+    name = (root.findtext("steamID") or "").strip()
+    if not name:
+        return None
+    avatar = (
+        (root.findtext("avatarFull") or "").strip()
+        or (root.findtext("avatarMedium") or "").strip()
+        or (root.findtext("avatarIcon") or "").strip()
+    )
+    return {
+        "display_name": name,
+        "profile_url": f"https://steamcommunity.com/profiles/{steam_id}",
+        "avatar_url": avatar,
+        "source": "steam_community",
+        "cached": False,
+        "steam_id": steam_id,
+    }
+
+
+def fetch_steam_community_names(steam_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Resolve Steam personas from public community profiles (no API key)."""
+    out: dict[str, dict[str, Any]] = {}
+    unique = [s for s in dict.fromkeys(steam_ids) if STEAM_ID_RE.fullmatch(s or "")]
+    if not unique:
+        return out
+    with httpx.Client(timeout=8.0, follow_redirects=True) as client:
+        for i, sid in enumerate(unique):
+            try:
+                resp = client.get(
+                    f"https://steamcommunity.com/profiles/{sid}/",
+                    params={"xml": "1"},
+                )
+                resp.raise_for_status()
+                info = parse_steam_community_xml(resp.text, sid)
+            except Exception as exc:  # noqa: BLE001
+                logger.info("Steam community lookup failed for %s: %s", sid, exc)
+                continue
+            if info:
+                out[sid] = info
+            if i + 1 < len(unique):
+                time.sleep(0.05)
+    return out
+
+
+def remember_community_personas(
+    db: Session, hits: dict[str, dict[str, Any]]
+) -> None:
+    for sid, info in hits.items():
+        name = str(info.get("display_name") or "").strip()
+        if not name:
+            continue
+        remember_identity(
+            db,
+            platform="steam",
+            external_id=sid,
+            display_name=name,
+            profile_url=str(info.get("profile_url") or ""),
+            avatar_url=str(info.get("avatar_url") or ""),
+            source="steam_community",
+        )

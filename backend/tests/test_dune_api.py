@@ -1,0 +1,273 @@
+"""Dune admin-HTTP client: login cache, Bearer, player-table parse."""
+
+from __future__ import annotations
+
+import json
+
+import httpx
+import pytest
+
+from app.services.dune_api import (
+    ApiEndpoint,
+    DuneApiError,
+    DuneAuthError,
+    DuneClient,
+    dedupe_player_rows,
+    parse_player_table,
+)
+
+PASSWORD = "ui-password"
+TOKEN = "hmac.token.value"
+
+
+def make_client(handler, *, secret: str = PASSWORD, **kwargs) -> DuneClient:
+    endpoint = ApiEndpoint(host="dune.example", port=8090, secret=secret)
+    return DuneClient(
+        endpoint,
+        transport=httpx.MockTransport(handler),
+        auth_cooldown_seconds=30.0,
+        **kwargs,
+    )
+
+
+def body_of(request: httpx.Request) -> dict:
+    return json.loads(request.content.decode()) if request.content else {}
+
+
+PLAYERS_STDOUT = (
+    " fls_id | character | steam_id | platform_name | life | online | last_avatar_activity \n"
+    "--------+-----------+----------+---------------+------+--------+----------------------\n"
+    " DE0BCCAA2501BF22 | Sergentval | 76561198041278656 | Steam | Alive | Online | 2026-05-28 07:22:05.861+00\n"
+    "(1 row)\n"
+)
+
+
+def test_parse_player_table_reads_fls_and_steam():
+    rows = parse_player_table(PLAYERS_STDOUT)
+    assert len(rows) == 1
+    assert rows[0]["fls_id"] == "DE0BCCAA2501BF22"
+    assert rows[0]["character"] == "Sergentval"
+    assert rows[0]["steam_id"] == "76561198041278656"
+    assert rows[0]["online"] == "Online"
+
+
+LIVE_DUP_PLAYERS_STDOUT = (
+    "      fls_id      | character |     steam_id      | platform_name | life  | online | last_avatar_activity \n"
+    "------------------+-----------+-------------------+---------------+-------+--------+----------------------\n"
+    " 3A9443BD8F1E46CD |           | 76561198067446355 | Steam         | Alive | Online | \n"
+    " 3A9443BD8F1E46CD | Jay       | 76561198067446355 | Steam         | Alive | Online | \n"
+    "(2 rows)\n"
+)
+
+
+def test_parse_player_table_collapses_duplicate_fls_and_keeps_character():
+    rows = parse_player_table(LIVE_DUP_PLAYERS_STDOUT)
+    assert len(rows) == 1
+    assert rows[0]["fls_id"] == "3A9443BD8F1E46CD"
+    assert rows[0]["character"] == "Jay"
+    assert rows[0]["steam_id"] == "76561198067446355"
+
+
+def test_dedupe_merges_name_onto_nameless_row():
+    rows = dedupe_player_rows(
+        [
+            {
+                "fls_id": "AABBCCDDEEFF0011",
+                "character": "",
+                "steam_id": "76561198000000000",
+                "platform_name": "Steam",
+                "life": "Alive",
+                "online": "Online",
+                "last_avatar_activity": "",
+            },
+            {
+                "fls_id": "AABBCCDDEEFF0011",
+                "character": "Stilgar",
+                "steam_id": "76561198000000000",
+                "platform_name": "Steam",
+                "life": "Alive",
+                "online": "Online",
+                "last_avatar_activity": "2026-08-19 10:00:00+00",
+            },
+        ]
+    )
+    assert len(rows) == 1
+    assert rows[0]["character"] == "Stilgar"
+
+
+def test_dedupe_keeps_distinct_accounts():
+    rows = dedupe_player_rows(
+        [
+            {
+                "fls_id": "AAAAAAAAAAAAAAA1",
+                "character": "One",
+                "steam_id": "76561198000000001",
+                "platform_name": "Steam",
+                "life": "Alive",
+                "online": "Online",
+                "last_avatar_activity": "",
+            },
+            {
+                "fls_id": "AAAAAAAAAAAAAAA2",
+                "character": "Two",
+                "steam_id": "76561198000000002",
+                "platform_name": "Steam",
+                "life": "Alive",
+                "online": "Online",
+                "last_avatar_activity": "",
+            },
+        ]
+    )
+    assert [r["character"] for r in rows] == ["One", "Two"]
+
+
+def test_parse_player_table_empty():
+    empty = (
+        " fls_id | character | steam_id | platform_name | life | online | last_avatar_activity \n"
+        "--------+-----------+----------+---------------+------+--------+----------------------\n"
+        "(0 rows)\n"
+    )
+    assert parse_player_table(empty) == []
+
+
+def test_login_then_bearer_on_status():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/login":
+            return httpx.Response(
+                200, json={"token": TOKEN, "csrf": "x", "expires_in": 604800, "type": "Bearer"}
+            )
+        if request.url.path == "/api/status":
+            return httpx.Response(200, json={"ok": True, "totalPlayers": 0, "maps": []})
+        return httpx.Response(404, json={"error": "missing"})
+
+    grid = make_client(handler).status()
+    assert grid["ok"] is True
+    assert seen[0].url.path == "/api/login"
+    assert body_of(seen[0]) == {"password": PASSWORD}
+    assert seen[1].url.path == "/api/status"
+    assert seen[1].headers["Authorization"] == f"Bearer {TOKEN}"
+
+
+def test_token_is_reused_across_calls():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/login":
+            return httpx.Response(200, json={"token": TOKEN, "expires_in": 604800})
+        return httpx.Response(200, json={"ok": True, "maps": []})
+
+    client = make_client(handler)
+    client.status()
+    client.status()
+    logins = [r for r in seen if r.url.path == "/api/login"]
+    assert len(logins) == 1
+    assert len(seen) == 3
+
+
+def test_401_on_status_relogs_once():
+    seen: list[httpx.Request] = []
+    status_hits = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/login":
+            return httpx.Response(200, json={"token": TOKEN, "expires_in": 604800})
+        status_hits["n"] += 1
+        if status_hits["n"] == 1:
+            return httpx.Response(401, json={"error": "auth required"})
+        return httpx.Response(200, json={"ok": True, "maps": []})
+
+    assert make_client(handler).status()["ok"] is True
+    assert [r.url.path for r in seen] == [
+        "/api/login",
+        "/api/status",
+        "/api/login",
+        "/api/status",
+    ]
+
+
+def test_bad_password_raises_auth_error_and_cools_down():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "bad password"})
+
+    client = make_client(handler)
+    with pytest.raises(DuneAuthError) as exc:
+        client.status()
+    assert "admin UI password" in str(exc.value)
+    with pytest.raises(DuneAuthError) as cooled:
+        client.status()
+    assert "cooldown" in str(cooled.value)
+
+
+def test_rate_limited_login_cools_down():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": "too many"}, headers={"Retry-After": "90"})
+
+    with pytest.raises(DuneAuthError) as exc:
+        make_client(handler).status()
+    assert exc.value.status == 429
+    assert "rate-limited" in str(exc.value)
+
+
+def test_players_parses_publish_stdout():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/login":
+            return httpx.Response(200, json={"token": TOKEN, "expires_in": 604800})
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "argv": ["players", "online"],
+                "stdout": PLAYERS_STDOUT,
+                "stderr": "",
+            },
+        )
+
+    rows = make_client(handler).players("online")
+    assert rows[0]["fls_id"] == "DE0BCCAA2501BF22"
+
+
+def test_broadcast_posts_admin_path():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/login":
+            return httpx.Response(200, json={"token": TOKEN, "expires_in": 604800})
+        return httpx.Response(200, json={"ok": True, "stdout": "publish=ok", "stderr": ""})
+
+    make_client(handler).broadcast("Maint", "Restart in 5", 20)
+    post = seen[-1]
+    assert post.url.path == "/admin/broadcast"
+    assert body_of(post) == {"title": "Maint", "body": "Restart in 5", "duration": 20}
+
+
+def test_failed_publish_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/login":
+            return httpx.Response(200, json={"token": TOKEN, "expires_in": 604800})
+        return httpx.Response(
+            200, json={"ok": False, "stdout": "", "stderr": "player not found"}
+        )
+
+    with pytest.raises(DuneApiError) as exc:
+        make_client(handler).kick("DEADBEEFDEADBEEF")
+    assert "player not found" in str(exc.value)
+
+
+def test_https_when_asked():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/login":
+            return httpx.Response(200, json={"token": TOKEN, "expires_in": 604800})
+        return httpx.Response(200, json={"ok": True})
+
+    endpoint = ApiEndpoint(host="dune.example", port=8090, secret=PASSWORD, use_https=True)
+    DuneClient(endpoint, transport=httpx.MockTransport(handler)).status()
+    assert str(seen[0].url).startswith("https://")

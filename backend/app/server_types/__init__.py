@@ -9,6 +9,7 @@ from app.server_types.base import (
     ServerTypeAdapter,
     ServerTypeInfo,
 )
+from app.server_types.dune import dune_adapter
 from app.server_types.palworld import palworld_adapter
 from app.server_types.sandstorm import sandstorm_adapter
 from app.server_types.satisfactory import satisfactory_adapter
@@ -19,6 +20,7 @@ _REGISTRY: dict[str, ServerTypeAdapter] = {
     sandstorm_adapter.info.id: sandstorm_adapter,
     satisfactory_adapter.info.id: satisfactory_adapter,
     palworld_adapter.info.id: palworld_adapter,
+    dune_adapter.info.id: dune_adapter,
 }
 
 
