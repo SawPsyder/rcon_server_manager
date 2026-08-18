@@ -20,26 +20,37 @@ import IdentityInfoButton from "../components/IdentityInfoButton";
 import MapPopularityPanel from "../components/MapPopularityPanel";
 import PlayerStatsChart from "../components/PlayerStatsChart";
 import TickRateChart from "../components/TickRateChart";
+import DuneAdminPanel from "../components/DuneAdminPanel";
 import PalworldAdminPanel from "../components/PalworldAdminPanel";
 import PterodactylPanel from "../components/PterodactylPanel";
 import ResourceHistoryChart from "../components/ResourceHistoryChart";
 import SatisfactoryAdminPanel from "../components/SatisfactoryAdminPanel";
 import { overviewBackSearch } from "./OverviewPage";
 
-type AdminPanelProps = { serverId: number; onChanged?: () => void };
+type AdminPanelProps = {
+  serverId: number;
+  onChanged?: () => void;
+  players?: import("../api").PlayerInfo[];
+};
 
 /** Which admin panel a type gets. features.admin_api only says one exists. */
 const ADMIN_PANELS: Record<string, React.ComponentType<AdminPanelProps>> = {
   satisfactory: SatisfactoryAdminPanel,
   palworld: PalworldAdminPanel,
+  dune: DuneAdminPanel,
 };
 
 /** snake_case PlayerInfo.extra keys → readable column headers. */
 function playerExtraLabel(key: string): string {
   const known: Record<string, string> = {
     account_name: "Account",
+    steam_name: "Steam",
     level: "Level",
     ping_ms: "Ping (ms)",
+    fls_id: "FLS id",
+    life: "Life",
+    platform: "Platform",
+    online: "Online",
   };
   return known[key] || key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
@@ -63,6 +74,11 @@ function extraStatLabel(key: string): string {
     in_game_days: "In-game days",
     base_camps: "Base camps",
     world_guid: "World GUID",
+    live_maps: "Live maps",
+    maps: "Maps",
+    instances: "Instances",
+    port_pool: "Port pool",
+    warning: "Warning",
   };
   if (known[key]) return known[key];
   return key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
@@ -160,6 +176,7 @@ export default function ServerDetailPage() {
       player_score: true,
       kick_ban: false,
       timed_ban: false,
+      perm_ban: true,
       ban_list: false,
       admin_say: false,
       a2s_query: true,
@@ -774,26 +791,28 @@ export default function ServerDetailPage() {
                   Ban
                 </button>
               )}
-              <button
-                className="btn danger"
-                disabled={!selectedPlayer || busy || !validServerId}
-                onClick={() => {
-                  if (!confirm(`Permban ${selectedPlayer}?`)) return;
-                  const reason = prompt("Reason", "Permanently banned") || "";
-                  if (!validServerId || !selectedPlayer) return;
-                  setBusy(true);
-                  api
-                    .permban(validServerId, selectedPlayer, reason, selectedNetId)
-                    .then((r) => {
-                      showResult("Permban", r);
-                      refreshStatus();
-                      if (selectedNetId) refreshIdentityFlags([selectedNetId]);
-                    })
-                    .finally(() => setBusy(false));
-                }}
-              >
-                Permban
-              </button>
+              {features.perm_ban && (
+                <button
+                  className="btn danger"
+                  disabled={!selectedPlayer || busy || !validServerId}
+                  onClick={() => {
+                    if (!confirm(`Permban ${selectedPlayer}?`)) return;
+                    const reason = prompt("Reason", "Permanently banned") || "";
+                    if (!validServerId || !selectedPlayer) return;
+                    setBusy(true);
+                    api
+                      .permban(validServerId, selectedPlayer, reason, selectedNetId)
+                      .then((r) => {
+                        showResult("Permban", r);
+                        refreshStatus();
+                        if (selectedNetId) refreshIdentityFlags([selectedNetId]);
+                      })
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  Permban
+                </button>
+              )}
               {features.structured_player_list && (
                 <button
                   className="btn ghost"
@@ -804,6 +823,7 @@ export default function ServerDetailPage() {
                 </button>
               )}
             </div>
+            {features.perm_ban && (
             <div className="row wrap" style={{ marginTop: "0.75rem" }}>
               <input
                 placeholder="Manual unban: Steam / SteamNWI:… / EOS:…"
@@ -818,6 +838,7 @@ export default function ServerDetailPage() {
                 Unban
               </button>
             </div>
+            )}
           </>
         )}
       </section>
@@ -953,7 +974,11 @@ export default function ServerDetailPage() {
       ) : null}
 
       {AdminPanel && validServerId && (
-        <AdminPanel serverId={validServerId} onChanged={refreshStatus} />
+        <AdminPanel
+          serverId={validServerId}
+          onChanged={refreshStatus}
+          players={status?.player_list}
+        />
       )}
 
       {features.console && (

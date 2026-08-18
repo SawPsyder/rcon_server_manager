@@ -176,6 +176,7 @@ def test_registered_with_expected_capabilities():
     assert info.features.kick_ban is True
     # /v1/api/ban has no duration — only permanent bans (Permaban in the UI)
     assert info.features.timed_ban is False
+    assert info.features.perm_ban is True
     assert info.features.admin_say is True
     # There is no ban-list endpoint (bans live in banlist.txt on the host), so
     # the list is shown but sourced from our own moderation history

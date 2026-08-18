@@ -32,6 +32,7 @@ A self-hosted **web admin dashboard** for managing game servers from one place.
 - Admin server schedules for Pterodactyl-linked containers (power, map, RCON) with player checks and retries
 - App timezone setting for schedule wall-clock times
 - Global Players leaderboard and multi-account identity linking
+- Dune: Awakening admin type via Sergentval egg HTTP
 <!-- FEATURES:END -->
 
 Game-specific admin tools (player control, map travel, saves, etc.) depend on the server type - see below.
@@ -85,6 +86,20 @@ Two optional extras:
 - Palworld serves **plain HTTP** and has no TLS of its own. Pocketpair warns these endpoints "are not designed to be exposed directly to the Internet" - keep port `8212` firewalled to trusted hosts. If you front it with a TLS-terminating reverse proxy, tick **Use HTTPS** on the server and optionally pin its certificate fingerprint.
 
 No ban list is shown for Palworld: the REST API has no endpoint for it, and bans live in `banlist.txt` on the server's disk.
+
+### Dune: Awakening
+
+Requires [Sergentval/pelican-egg-dune-awakening](https://github.com/Sergentval/pelican-egg-dune-awakening) with its admin UI enabled. Dune has no Source query or RCON — this manager talks to that egg's **admin HTTP** sidecar (default port `8090`). Store the egg's `DUNE_ADMIN_UI_PASSWORD`. The manager logs in, caches the 7-day Bearer token, and refreshes on 401.
+
+Egg repository: https://github.com/Sergentval/pelican-egg-dune-awakening
+
+- Live battlegroup status (instance count, online players, healthy maps)
+- Online roster with in-game character and Steam persona (one row per FLS account)
+- Kick and admin broadcast — the game has no ban command
+- Admin panel: last-saved-position map + named teleport, 195-key INI settings, instance / sietch scale
+- Optional HTTPS + certificate pin if a reverse proxy terminates TLS in front of the egg
+
+Allocate the admin UI port on the egg (`DUNE_ADMIN_UI_ENABLED=1`, `DUNE_ADMIN_UI_PORT=8090`) and keep it reachable from this manager. Whole-container start/stop/restart stays on the existing Pterodactyl power controls.
 
 ---
 
@@ -197,9 +212,10 @@ see a **Temp locked** status on **Users** and can unlock the account immediately
 
 - **Administrator** — everything, including connection settings and user management.
 - **User** — only the servers an administrator grants them. On those servers they can do
-  everything an admin can: RCON, kick/ban/unban, map travel, the Palworld and Satisfactory
-  panels. They **cannot** see or edit connection settings (host, ports, RCON password, TLS
-  options), and servers they were not granted are invisible — not merely hidden in the UI,
+  everything an admin can: RCON, kick/ban/unban, map travel, the Palworld, Satisfactory,
+  and Dune: Awakening panels. They **cannot** see or edit connection settings (host,
+  ports, RCON password, TLS options), and servers they were not granted are invisible —
+  not merely hidden in the UI,
   but 404 from the API.
 
 **Invitations.** Administrators invite users from **Users**. With email configured the
