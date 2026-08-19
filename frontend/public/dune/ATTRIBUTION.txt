@@ -8,5 +8,14 @@ Sourced from the Sergentval pelican-egg-dune-awakening admin SPA
 lifted them from Icehunter/dune-admin (MIT). World-coordinate frames live
 in frontend/src/lib/duneMapCoords.ts and must change with the images.
 
+arrakeen.webp and harko.webp are cropped. Upstream letterboxes both into a
+512 x 512 canvas (Arrakeen's content is the top 512 x 292, Harko's the
+top-left 320 x 320) and applies the world bounds across the whole square, so
+the bundled originals showed wide black bars. They ship cropped to their
+content with minX/maxX/minY/maxY shrunk by the same fraction, which leaves
+every world-to-pixel projection identical to upstream's. hagga-basin.webp is
+upstream's 4096 px original downscaled to 512; deepdesert.webp is unmodified.
+Re-cropping means recomputing the bounds and bumping the ?v= cache-buster.
+
 Dune: Awakening is copyright Funcom. These images are bundled only so
 operators can place last-saved player positions on the in-game maps.

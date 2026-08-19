@@ -861,10 +861,6 @@ class DuneForceRequest(BaseModel):
     force: bool = False
 
 
-class DuneSietchCreate(BaseModel):
-    label: str = Field(default="", max_length=64)
-
-
 class RconCommandRequest(BaseModel):
     command: str = Field(min_length=1, max_length=2000)
 

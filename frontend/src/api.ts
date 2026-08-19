@@ -1586,11 +1586,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ force }),
       }),
-    addSietch: (id: number, label = "") =>
-      request<DuneAction>(`/api/servers/${id}/dune/sietches`, {
-        method: "POST",
-        body: JSON.stringify({ label }),
-      }),
     parkSietch: (id: number, partitionId: number, force = false) =>
       request<DuneAction>(`/api/servers/${id}/dune/sietches/${partitionId}/park`, {
         method: "POST",

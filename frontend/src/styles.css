@@ -3206,23 +3206,79 @@ label.chip:has(input:disabled) {
   min-height: 28rem;
 }
 
-.dune-map .pw-map-stage {
-  position: relative;
-  left: auto;
-  top: auto;
-  width: 760px;
-  transform-origin: top left;
+/* Stage geometry is the shared centre-anchored one (.pw-map-stage): the map
+   sits in the middle of the viewport and zoom 1 fits the whole region. */
+
+/* Multi-value stat cards (Dune: one live map per region). */
+.stat-list {
+  margin: 0;
+  padding-left: 1.1em;
+  list-style: disc;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  font-weight: inherit;
 }
 
-.dune-map .pw-map-image {
-  position: relative;
-  inset: auto;
-  width: 100%;
-  height: auto;
+/* Put the dot itself on the world point. The shared marker centres the whole
+   dot+label stack, which lifts the dot several px off the real position - fine
+   for a Palworld overview, wrong for reading a Deep Desert sector. */
+.dune-map .pw-map-marker {
+  display: block;
+  width: 0;
+  height: 0;
+  max-width: none;
+  overflow: visible;
+  transform: none;
+}
+
+.dune-map .pw-map-marker-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+}
+
+.dune-map .pw-map-marker-label {
+  position: absolute;
+  left: 0;
+  top: 0.5rem;
+  transform: translateX(-50%);
+}
+
+.dune-player-row.primary {
+  border-color: var(--accent);
+}
+
+.dune-player-row.primary .muted {
+  color: rgba(26, 18, 6, 0.72);
 }
 
 .dune-map-pick {
   cursor: crosshair;
+}
+
+/* Deep Desert sector grid. Drawn in viewport space, so the 1px strokes and
+   the A1-I9 labels stay legible at every zoom level. */
+.dune-map-grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.dune-map-grid line {
+  stroke: rgba(255, 255, 255, 0.22);
+  stroke-width: 1;
+}
+
+.dune-map-grid text {
+  fill: rgba(255, 255, 255, 0.42);
+  font-size: 11px;
+  font-family: inherit;
+  text-anchor: middle;
+  dominant-baseline: middle;
 }
 
 .dune-map-pin {
@@ -3231,6 +3287,7 @@ label.chip:has(input:disabled) {
   pointer-events: none;
   color: #e8a23a;
   line-height: 1;
+  font-size: 15px;
 }
 
 .dune-map-pin.pending {

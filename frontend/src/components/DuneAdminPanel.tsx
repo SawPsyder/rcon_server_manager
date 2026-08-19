@@ -10,7 +10,7 @@ import {
   DuneStatusGrid,
   PlayerInfo,
 } from "../api";
-import { DUNE_MAPS, type DuneMapKey } from "../lib/duneMapCoords";
+import { DUNE_MAPS, sectorFor, type DuneMapKey } from "../lib/duneMapCoords";
 import DuneWorldMap from "./DuneWorldMap";
 
 type Props = {
@@ -292,11 +292,6 @@ export default function DuneAdminPanel({ serverId, onChanged, players = [] }: Pr
     if (ok) await loadInstances();
   };
 
-  const addSietch = async () => {
-    const result = await run(() => api.dune.addSietch(serverId), "Adding sietch.");
-    if (result?.ok) await loadInstances();
-  };
-
   const changedSettings = useMemo(() => {
     if (!settings) return [];
     const out: { id: string; value: string }[] = [];
@@ -316,6 +311,10 @@ export default function DuneAdminPanel({ serverId, onChanged, players = [] }: Pr
     for (const row of changedSettings) payload[row.id] = row.value;
     const result = await run(() => api.dune.saveSettings(serverId, payload));
     if (!result) return;
+    // Re-read BEFORE reporting: loadSettings goes through run(), which clears
+    // notice and error, so a message set first was wiped before it rendered —
+    // a save that worked looked like nothing had happened at all.
+    if (result.applied.length) await loadSettings();
     if (result.errors.length) {
       setError(result.errors.map((e) => `${e.id}: ${e.error}`).join("; "));
     }
@@ -325,7 +324,6 @@ export default function DuneAdminPanel({ serverId, onChanged, players = [] }: Pr
           ? `Applied ${result.applied.length} setting(s). Restart the battlegroup for them to take effect.`
           : `Applied ${result.applied.length} setting(s).`
       );
-      await loadSettings();
     }
   };
 
@@ -346,6 +344,7 @@ export default function DuneAdminPanel({ serverId, onChanged, players = [] }: Pr
     return [...names];
   }, [grid, partsByMap]);
 
+  const mapCfg = DUNE_MAPS.find((m) => m.key === mapKey) ?? DUNE_MAPS[0];
   const operational = allMaps.filter((m) => !isSecondary(m)).sort();
   const secondary = allMaps.filter((m) => isSecondary(m)).sort((a, b) => mapLabel(a).localeCompare(mapLabel(b)));
   const mapLocations = locations.filter((l) => l.map === mapKey);
@@ -360,6 +359,29 @@ export default function DuneAdminPanel({ serverId, onChanged, players = [] }: Pr
     }
     return out;
   }, [markers, players]);
+
+  // The target is an FLS id; show whoever it belongs to, on this map or not.
+  const targetLabel = useMemo(() => {
+    if (!target) return "";
+    const marker = markers.find((m) => m.fls === target);
+    if (marker) return rosterLabel(marker, players);
+    const row = players.find((p) => String(p.extra?.fls_id || "") === target);
+    return row?.name || target;
+  }, [target, markers, players]);
+
+  // Markers are per-map, so an online player standing in a hub, a dungeon or
+  // another region simply has no dot here. Say how many, rather than leaving
+  // the operator to wonder whether the map is broken.
+  const offMapOnline = useMemo(() => {
+    const here = new Set(
+      uniqueMarkers.filter((m) => m.online && m.fls).map((m) => m.fls)
+    );
+    const elsewhere = players.filter((p) => {
+      const fls = String(p.extra?.fls_id || "");
+      return !fls || !here.has(fls);
+    });
+    return elsewhere.length;
+  }, [uniqueMarkers, players]);
 
   return (
     <section className="card">
@@ -390,9 +412,11 @@ export default function DuneAdminPanel({ serverId, onChanged, players = [] }: Pr
                 key={m.key}
                 type="button"
                 className={`btn small ${mapKey === m.key ? "primary" : "ghost"}`}
+                title={m.liveData ? undefined : "No player positions on this map"}
                 onClick={() => setMapKey(m.key)}
               >
                 {m.label}
+                {m.liveData ? "" : " *"}
               </button>
             ))}
             <button
@@ -406,11 +430,15 @@ export default function DuneAdminPanel({ serverId, onChanged, players = [] }: Pr
               {pickMode ? "Picking…" : "Add location"}
             </button>
             <span className="muted">
-              Target: <code>{target || "(none)"}</code>
+              Target: {target ? <strong>{targetLabel}</strong> : <code>(none)</code>}
             </span>
           </div>
           <p className="muted pw-map-footnote">
-            Dots are the last saved pawn position, not a live client arrow — they can lag by tens of seconds.
+            {!mapCfg.liveData
+              ? "No player positions on this map."
+              : offMapOnline > 0
+                ? `Player positions can be up to a minute old. ${offMapOnline} online elsewhere.`
+                : "Player positions can be up to a minute old."}
           </p>
           <DuneWorldMap
             mapKey={mapKey}
@@ -466,12 +494,15 @@ export default function DuneAdminPanel({ serverId, onChanged, players = [] }: Pr
                 <button
                   key={m.fls || m.id}
                   type="button"
-                  className={`btn small ghost ${m.fls === target ? "primary" : ""}`}
+                  className={`btn small dune-player-row ${m.fls === target ? "primary" : "ghost"}`}
                   disabled={!m.fls}
                   onClick={() => m.fls && setTarget(m.fls)}
                   style={{ display: "block", width: "100%", textAlign: "left", marginBottom: "0.25rem" }}
                 >
                   {m.online ? "●" : "○"} {m.name || m.fls}
+                  {sectorFor(m.x, m.y, mapCfg) && (
+                    <span className="muted"> · {sectorFor(m.x, m.y, mapCfg)}</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -491,9 +522,6 @@ export default function DuneAdminPanel({ serverId, onChanged, players = [] }: Pr
             <div className="row wrap">
               <button className="btn small ghost" type="button" disabled={busy} onClick={() => void loadInstances()}>
                 Refresh
-              </button>
-              <button className="btn small" type="button" disabled={busy} onClick={() => void addSietch()}>
-                Add sietch
               </button>
             </div>
           </div>
@@ -637,7 +665,10 @@ export default function DuneAdminPanel({ serverId, onChanged, players = [] }: Pr
               const needle = settingsFilter.trim().toLowerCase();
               const visible = items.filter((item) => {
                 if (!showAdvanced && item.advanced) return false;
-                if (item.type === "struct") return showAdvanced;
+                // Struct rows are advanced-only, but they still have to honour
+                // the filter — returning showAdvanced here short-circuited it,
+                // so searching for one damage config listed every struct.
+                if (item.type === "struct" && !showAdvanced) return false;
                 if (!needle) return true;
                 return (
                   item.label.toLowerCase().includes(needle) ||

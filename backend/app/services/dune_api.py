@@ -46,6 +46,18 @@ MAP_KEYS = ("HaggaBasin", "DeepDesert", "Arrakeen", "HarkoVillage")
 SCALABLE_MAPS = ("DeepDesert_1", "SH_Arrakeen", "SH_HarkoVillage")
 SCALE_REPLICAS_MAX = 4
 
+# Two of the 195 INI keys carry status the grid does not: the advertised
+# server name and the player cap. Read from /api/settings and TTL-cached so a
+# status poll does not re-read the whole catalogue every time.
+# /api/login answers with Set-Cookie for both of these. We deliberately do not
+# ride the cookie session — see DuneClient._send.
+SESSION_COOKIE_NAME = "dune_session"
+CSRF_COOKIE_NAME = "dune_csrf"
+
+SETTING_DISPLAY_NAME = "Bgd.ServerDisplayName"
+SETTING_PLAYER_HARD_CAP = "Bgd.ServerPlayerHardCap"
+SERVER_INFO_TTL_SECONDS = 120.0
+
 
 class DuneApiError(CommandError):
     """An admin-HTTP call failed (HTTP status, error body, or transport)."""
@@ -204,6 +216,60 @@ def _merge_player_row(left: dict[str, str], right: dict[str, str]) -> dict[str, 
     return winner
 
 
+def row_is_online(row: Mapping[str, Any]) -> bool:
+    """Is this *resolved* roster row a connected player?
+
+    Only meaningful after :func:`dedupe_player_rows` has merged an account's
+    rows — a raw ``online`` cell straight out of the SQL cannot be trusted.
+    See :meth:`DuneClient.players`.
+    """
+    return str(row.get("online") or "").strip().lower() == "online"
+
+
+def settings_server_info(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """``/api/settings`` → the two keys that belong on the status card.
+
+    ``Bgd.ServerDisplayName`` is the name the server advertises and
+    ``Bgd.ServerPlayerHardCap`` its player cap. Both are plain INI keys with
+    no grid equivalent; an unset cap stays ``None`` so callers can hide the
+    slot count rather than print a made-up one.
+    """
+    info: dict[str, Any] = {"display_name": "", "player_hard_cap": None}
+    fields = {
+        SETTING_DISPLAY_NAME: "display_name",
+        SETTING_PLAYER_HARD_CAP: "player_hard_cap",
+    }
+    categories = payload.get("categories")
+    if not isinstance(categories, Mapping):
+        return info
+    for items in categories.values():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            field_name = fields.get(str(item.get("key") or ""))
+            if not field_name:
+                continue
+            value = item.get("value")
+            if value is None or not str(value).strip():
+                value = item.get("default")
+            text = "" if value is None else str(value).strip()
+            if field_name == "display_name":
+                info["display_name"] = text
+            else:
+                info["player_hard_cap"] = _positive_int(text)
+    return info
+
+
+def _positive_int(text: str) -> int | None:
+    try:
+        value = int(float(text))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def pretty_uptime(seconds: Any) -> str:
     try:
         total = int(seconds)
@@ -262,6 +328,9 @@ class DuneClient:
         self._auth_error = ""
         self._token = ""
         self._token_expires_at = 0.0
+        self._csrf = ""
+        self._info: dict[str, Any] = {"display_name": "", "player_hard_cap": None}
+        self._info_read_at = 0.0
         self.created_at = time.time()
         self.last_used = 0.0
         self.call_count = 0
@@ -318,8 +387,7 @@ class DuneClient:
             response = self._send(method, path, json_body, timeout, auth=auth)
             if auth and response.status_code == 401:
                 # Token expired / revoked — login once and retry.
-                self._token = ""
-                self._token_expires_at = 0.0
+                self._forget_session()
                 self._ensure_token(timeout)
                 response = self._send(method, path, json_body, timeout, auth=True)
             result = self._parse(response, f"{method} {path}")
@@ -346,6 +414,7 @@ class DuneClient:
         if self._token and time.time() < self._token_expires_at - TOKEN_REFRESH_SKEW_SECONDS:
             return
         payload = self._login(timeout)
+
         token = str(payload.get("token") or "").strip()
         if not token:
             raise DuneAuthError(
@@ -361,6 +430,11 @@ class DuneClient:
         self._auth_blocked_until = 0.0
         self._auth_error = ""
 
+    def _forget_session(self) -> None:
+        self._token = ""
+        self._token_expires_at = 0.0
+        self._csrf = ""
+
     def _login(self, timeout: float | None) -> dict[str, Any]:
         response = self._send(
             "POST",
@@ -369,6 +443,11 @@ class DuneClient:
             timeout,
             auth=False,
         )
+        # The login body strips the csrf value; only the cookie carries it.
+        # We stay on Bearer auth (so the egg exempts us from the CSRF check),
+        # but keep the value so a reverse proxy that re-attaches the session
+        # cookie cannot push our mutations back behind the gate.
+        self._csrf = response.cookies.get(CSRF_COOKIE_NAME) or self._csrf
         status = response.status_code
         if status == 429:
             retry_after = response.headers.get("Retry-After")
@@ -404,23 +483,35 @@ class DuneClient:
         auth: bool,
     ) -> httpx.Response:
         url = f"{self.endpoint.base_url}{path}"
+        method = method.upper()
         headers = {"Accept": "application/json"}
         if auth and self._token:
             headers["Authorization"] = f"Bearer {self._token}"
+        if self._csrf and method != "GET":
+            headers["X-CSRF-Token"] = self._csrf
+        # The egg resolves the session from the cookie BEFORE the Authorization
+        # header, and a cookie-borne session must also carry X-CSRF-Token.
+        # /api/login sets that cookie, so httpx's jar would replay it on every
+        # later call, silently downgrading us from Bearer to cookie auth — which
+        # made every mutation ("/admin/*", POST /api/settings, instance and
+        # sietch scale) fail with "csrf token missing or invalid" while reads,
+        # which skip the CSRF gate, kept working. Bearer-only is the documented
+        # path for non-browser clients, so drop the jar before every request.
+        self._http.cookies.clear()
         kwargs: dict[str, Any] = {"headers": headers}
         if timeout is not None:
             kwargs["timeout"] = timeout
         if json_body is not None:
             kwargs["json"] = dict(json_body)
-        elif method.upper() == "POST":
+        elif method == "POST":
             kwargs["content"] = b""
         try:
-            return self._http.request(method.upper(), url, **kwargs)
+            return self._http.request(method, url, **kwargs)
         except httpx.TimeoutException as exc:
             raise DuneTimeoutError(
                 f"Dune admin HTTP timed out after "
                 f"{timeout if timeout is not None else self.timeout:g}s calling "
-                f"{method.upper()} {path} on {self.endpoint.host}:{self.endpoint.port}"
+                f"{method} {path} on {self.endpoint.host}:{self.endpoint.port}"
             ) from exc
         except httpx.ConnectError as exc:
             message = str(exc)
@@ -443,8 +534,7 @@ class DuneClient:
         if status == 401:
             self._auth_error = "admin UI password rejected"
             self._auth_blocked_until = time.time() + self.auth_cooldown_seconds
-            self._token = ""
-            self._token_expires_at = 0.0
+            self._forget_session()
             raise DuneAuthError(
                 f"{what} was rejected: check the admin UI password "
                 "(DUNE_ADMIN_UI_PASSWORD on the egg).",
@@ -471,7 +561,36 @@ class DuneClient:
         return _as_dict(self.request("GET", "/api/status"))
 
     def players(self, filter: str = "online") -> list[dict[str, str]]:
-        kind = "online" if filter == "online" else "all"
+        """Deduped roster. ``filter="online"`` is resolved here, not in SQL.
+
+        ``admin players online`` pushes ``online_status='Online'`` into the
+        JOIN, and that keeps the wrong row. Funcom leaves a nameless
+        ``encrypted_player_state`` leftover next to the live character row, and
+        the leftover's ``online_status`` is stuck at 'Online' forever — so the
+        SQL filter reports every account that ever played as connected, with
+        no character name attached. Live-verified on an idle server: the named
+        row read 'Offline' with a logout timestamp while the leftover still
+        read 'Online', and ``/api/map/markers`` (which reads the plaintext
+        ``dune.player_state`` instead) agreed the player was offline.
+
+        So ask for every row and let :func:`dedupe_player_rows` resolve the
+        account first — it prefers the row that owns the character name, the
+        same authority the egg's own ``assert_player_offline`` write guard
+        uses. Accounts that the ``all`` window missed (both reads are
+        ``LIMIT 100``) are still carried over from the SQL-filtered list, so
+        this only ever drops false positives, never a real player.
+        """
+        rows = self._player_rows("all")
+        if filter != "online":
+            return rows
+        online = [row for row in rows if row_is_online(row)]
+        seen = {row["fls_id"] for row in rows}
+        online.extend(
+            row for row in self._player_rows("online") if row["fls_id"] not in seen
+        )
+        return online
+
+    def _player_rows(self, kind: str) -> list[dict[str, str]]:
         payload = _as_dict(self.request("GET", f"/api/players?filter={kind}"))
         if payload.get("ok") is False:
             raise DuneApiError(
@@ -485,6 +604,34 @@ class DuneClient:
 
     def settings(self) -> dict[str, Any]:
         return _as_dict(self.request("GET", "/api/settings"))
+
+    def server_info(self, *, max_age: float = SERVER_INFO_TTL_SECONDS) -> dict[str, Any]:
+        """Cached ``{display_name, player_hard_cap}`` for the status card.
+
+        Settings change only when an operator edits them, so a status poll
+        reads the catalogue at most once per ``max_age``. A failed read keeps
+        the last good answer instead of blanking the card — the grid poll that
+        called us has already proven the endpoint is up.
+        """
+        with self._lock:
+            if self._info_read_at and time.time() - self._info_read_at < max_age:
+                return dict(self._info)
+        try:
+            payload = self.settings()
+        except DuneApiError as exc:
+            logger.info(
+                "Dune /api/settings read failed for %s:%s: %s",
+                self.endpoint.host,
+                self.endpoint.port,
+                exc,
+            )
+            with self._lock:
+                return dict(self._info)
+        info = settings_server_info(payload)
+        with self._lock:
+            self._info = info
+            self._info_read_at = time.time()
+        return dict(info)
 
     def map_markers(self, map_key: str) -> dict[str, Any]:
         key = (map_key or "").strip()
@@ -571,12 +718,6 @@ class DuneClient:
                 {"force": bool(force)},
             )
         )
-
-    def add_sietch(self, label: str = "") -> dict[str, Any]:
-        body: dict[str, Any] = {}
-        if label.strip():
-            body["label"] = label.strip()
-        return _as_dict(self.request("POST", "/api/sietches", body))
 
     def park_sietch(self, partition_id: int, *, force: bool = False) -> dict[str, Any]:
         return _as_dict(

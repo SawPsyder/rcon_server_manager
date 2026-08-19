@@ -10,8 +10,10 @@ from app.server_types.dune import (
     dune_adapter,
     enrich_dune_roster,
     kick_target,
+    map_label,
     normalize_player,
     roster_entry,
+    sorted_map_labels,
     status_extra,
 )
 from app.services import dune_api
@@ -53,10 +55,13 @@ RAW_PLAYERS = [
 
 
 class FakeClient:
-    def __init__(self, *, status=None, players=None, partitions=None, fail=None):
+    def __init__(
+        self, *, status=None, players=None, partitions=None, info=None, fail=None
+    ):
         self._status = RAW_STATUS if status is None else status
         self._players = RAW_PLAYERS if players is None else players
         self._partitions = partitions if partitions is not None else {"ok": True, "partitions": []}
+        self._info = info if info is not None else {"display_name": "", "player_hard_cap": None}
         self._fail = fail or {}
         self.calls: list[tuple[str, tuple]] = []
 
@@ -68,6 +73,10 @@ class FakeClient:
         self._maybe_fail("status")
         self.calls.append(("status", ()))
         return self._status
+
+    def server_info(self, **kwargs):
+        self.calls.append(("server_info", ()))
+        return dict(self._info)
 
     def players(self, filter="online"):
         self._maybe_fail("players")
@@ -229,7 +238,23 @@ def test_query_status_from_grid(fake_pool):
     assert snap["players"] == 2
     assert snap["extra"]["instances"] == 5
     assert snap["extra"]["live_maps"] == 2
-    assert "Survival_1" in (snap["map"] or "")
+    # Region names, A-Z; the starting instance is not live yet.
+    assert snap["map"] == "Deep Desert, Hagga Basin"
+    assert snap["extra"]["maps"] == "Deep Desert, Hagga Basin"
+
+
+def test_query_status_reads_name_and_cap_from_settings(fake_pool):
+    fake_pool(FakeClient(info={"display_name": "Arrakis", "player_hard_cap": 40}))
+    snap = dune_adapter.query_status("quantumrabbit", 8090, secret="pw")
+    assert snap["hostname"] == "Arrakis"
+    assert snap["max_players"] == 40
+
+
+def test_query_status_leaves_cap_unset_when_not_configured(fake_pool):
+    fake_pool(FakeClient())
+    snap = dune_adapter.query_status("quantumrabbit", 8090, secret="pw")
+    assert snap["hostname"] is None
+    assert snap["max_players"] is None
 
 
 def test_query_status_auth_error_is_reachable(fake_pool):
@@ -282,6 +307,40 @@ def test_status_extra_counts_healthy_maps():
     assert extra["live_maps"] == 2
     assert extra["instances"] == 5
     assert extra["uptime"] == "1h 1m"
+
+
+def test_map_label_maps_instance_names_to_regions():
+    assert map_label("Survival_1") == "Hagga Basin"
+    assert map_label("SH_HarkoVillage") == "Harko Village"
+    assert map_label("DeepDesert_1") == "Deep Desert"
+    # Unknown instances still lose the prefix rather than leaking raw keys.
+    assert map_label("CB_Dungeon_ThePit") == "Dungeon ThePit"
+
+
+def test_sorted_map_labels_are_alphabetical_and_healthy_only():
+    grid = {
+        "maps": [
+            {"map": "SH_HarkoVillage", "status": "healthy", "players": 0},
+            {"map": "Survival_1", "status": "healthy", "players": 0},
+            {"map": "DeepDesert_1", "status": "healthy", "players": 0},
+            {"map": "SH_Arrakeen", "status": "starting", "players": 0},
+        ]
+    }
+    assert sorted_map_labels(grid["maps"]) == [
+        "Deep Desert",
+        "Hagga Basin",
+        "Harko Village",
+    ]
+    assert sorted_map_labels(None) == []
+
+
+def test_sample_players_reports_cap_zero_when_unset(fake_pool):
+    fake_pool(FakeClient())
+    snap = dune_adapter.sample_players("quantumrabbit", 8090, rcon_password="pw")
+    assert snap["max_players"] == 0
+    fake_pool(FakeClient(info={"display_name": "", "player_hard_cap": 40}))
+    snap = dune_adapter.sample_players("quantumrabbit", 8090, rcon_password="pw")
+    assert snap["max_players"] == 40
 
 
 def test_normalize_player_exported():
