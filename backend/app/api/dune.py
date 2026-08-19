@@ -26,7 +26,6 @@ from app.schemas import (
     DuneLocationAction,
     DuneScaleRequest,
     DuneSettingsUpdate,
-    DuneSietchCreate,
     DuneTeleportRequest,
 )
 from app.server_types.dune import client_for_server
@@ -333,22 +332,6 @@ def dimension_down(
     action = _action(payload, fallback=f"Stopping partition {partition_id}.")
     if action.ok and not action.requires_confirmation:
         _log(db, server, f"dimension down {partition_id}", action.detail, actor=user)
-    return action
-
-
-@router.post("/sietches", response_model=DuneActionOut)
-def add_sietch(
-    server_id: int,
-    user: CurrentUser,
-    body: DuneSietchCreate,
-    db: Session = Depends(get_db),
-) -> DuneActionOut:
-    server, client = _client(db, server_id)
-    with _api_errors():
-        payload = client.add_sietch(body.label)
-    action = _action(payload, fallback="Sietch added.")
-    if action.ok:
-        _log(db, server, "sietch add", action.detail, actor=user)
     return action
 
 

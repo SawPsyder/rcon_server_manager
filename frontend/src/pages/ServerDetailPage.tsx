@@ -89,6 +89,26 @@ function formatExtraStat(value: string | number | boolean | null): string {
   return value === null ? "-" : String(value);
 }
 
+/** Stat keys whose value is a comma-separated set, not one reading. */
+const LIST_STAT_KEYS = new Set(["maps"]);
+
+/** A multi-value stat reads as a list. Dune's battlegroup runs one instance
+    per region, so Map / Maps carry every live region at once. */
+function StatValue({ value }: { value: string }) {
+  const parts = value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return <>{value}</>;
+  return (
+    <ul className="stat-list">
+      {parts.map((part) => (
+        <li key={part}>{part}</li>
+      ))}
+    </ul>
+  );
+}
+
 /** Seed status cards immediately from last cached poll (no wait for live query). */
 function statusFromServerCache(server: Server): ServerStatus {
   return {
@@ -444,9 +464,11 @@ export default function ServerDetailPage() {
     [validServerId, bansPage, bansPageSize, applyBanList]
   );
 
-  // Load cached bans when switching server
+  // Load cached bans when switching server. Gate on ban_list, not kick_ban:
+  // types that can kick but cannot enumerate bans (Dune, Palworld) never
+  // render the table, and asking for it 400s on every page load.
   useEffect(() => {
-    if (!validServerId || !features.kick_ban) {
+    if (!validServerId || !features.ban_list) {
       setBans([]);
       setBansRaw("");
       setBansFetchedAt(null);
@@ -458,7 +480,7 @@ export default function ServerDetailPage() {
     setBansPage(1);
     loadBans({ refresh: false, page: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when server changes
-  }, [validServerId, features.kick_ban]);
+  }, [validServerId, features.ban_list]);
 
   const runRcon = async (command: string, title = "RCON") => {
     if (!validServerId) return;
@@ -582,7 +604,7 @@ export default function ServerDetailPage() {
           <div className="stat card">
             <div className="stat-label">Map</div>
             <div className="stat-value">
-              {status?.map || "-"}
+              <StatValue value={status?.map || "-"} />
               {status?.lighting ? ` (${status.lighting})` : ""}
             </div>
           </div>
@@ -590,7 +612,10 @@ export default function ServerDetailPage() {
         <div className="stat card">
           <div className="stat-label">Players</div>
           <div className="stat-value">
-            {status?.players ?? "-"}/{status?.max_players ?? "-"}
+            {status?.players ?? "-"}
+            {/* Dune reports no cap unless Bgd.ServerPlayerHardCap is set;
+                a bare count beats "0/-". */}
+            {(status?.max_players ?? 0) > 0 ? `/${status?.max_players}` : ""}
           </div>
         </div>
         {(status?.gamemode || status?.coop_or_versus) && (
@@ -605,7 +630,13 @@ export default function ServerDetailPage() {
         {extraStats.map(([key, value]) => (
           <div className="stat card" key={key}>
             <div className="stat-label">{extraStatLabel(key)}</div>
-            <div className="stat-value">{formatExtraStat(value)}</div>
+            <div className="stat-value">
+              {LIST_STAT_KEYS.has(key) ? (
+                <StatValue value={formatExtraStat(value)} />
+              ) : (
+                formatExtraStat(value)
+              )}
+            </div>
           </div>
         ))}
       </section>

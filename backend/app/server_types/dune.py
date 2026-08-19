@@ -63,6 +63,45 @@ QUICK_BUTTONS = (
 # steam_name is filled later from the Steam Web API / identity cache.
 ROSTER_EXTRA_KEYS = ("steam_name", "fls_id", "life", "platform")
 
+# Battlegroup instance names → the region an operator recognises. The grid
+# reports the raw UE map name; the panel, the console table and the Map /
+# Maps status fields all read better with the in-game name.
+MAP_LABELS = {
+    "Survival_1": "Hagga Basin",
+    "Overmap": "Overland",
+    "DeepDesert_1": "Deep Desert",
+    "SH_Arrakeen": "Arrakeen",
+    "SH_HarkoVillage": "Harko Village",
+    "SH_FallenLight": "Fallen Light",
+}
+
+
+def map_label(raw: str) -> str:
+    """``SH_HarkoVillage`` → ``Harko Village``; unknown names de-prefixed."""
+    name = (raw or "").strip()
+    if not name:
+        return ""
+    known = MAP_LABELS.get(name)
+    if known:
+        return known
+    for prefix in ("DLC_", "CB_", "SH_"):
+        if name.startswith(prefix):
+            name = name[len(prefix) :]
+            break
+    return name.replace("_", " ")
+
+
+def sorted_map_labels(maps: Any) -> list[str]:
+    """Healthy grid rows → region names, A-Z. Empty when nothing is live."""
+    if not isinstance(maps, list):
+        return []
+    labels = {
+        map_label(str(row.get("map") or ""))
+        for row in maps
+        if isinstance(row, Mapping) and row.get("status") == "healthy"
+    }
+    return sorted(label for label in labels if label)
+
 
 def quote_arg(value: str) -> str:
     text = value or ""
@@ -195,11 +234,7 @@ def status_extra(grid: Mapping[str, Any]) -> dict[str, Any]:
     extra: dict[str, Any] = {}
     maps = grid.get("maps")
     if isinstance(maps, list):
-        live = [
-            str(row.get("map") or "")
-            for row in maps
-            if isinstance(row, Mapping) and row.get("status") == "healthy"
-        ]
+        live = sorted_map_labels(maps)
         extra["live_maps"] = len(live)
         extra["maps"] = ", ".join(live) if live else "-"
     if grid.get("totalServers") is not None:
@@ -250,11 +285,12 @@ def _render_status(grid: Mapping[str, Any]) -> str:
     if maps:
         lines.append("")
         lines.append(f"{'Map':<22}{'Status':<12}Players")
-        for row in maps:
-            if not isinstance(row, Mapping):
-                continue
+        for row in sorted(
+            (row for row in maps if isinstance(row, Mapping)),
+            key=lambda row: map_label(str(row.get("map") or "")),
+        ):
             lines.append(
-                f"{str(row.get('map') or '-'):<22}"
+                f"{map_label(str(row.get('map') or '')) or '-':<22}"
                 f"{str(row.get('status') or '-'):<12}"
                 f"{row.get('players', 0)}"
             )
@@ -447,17 +483,18 @@ class DuneAdapter(DefaultAdapter):
 
         extra = status_extra(grid)
         maps = extra.get("maps")
+        info = client.server_info()
         return {
             "online": True,
             "host": host,
             "query_port": query_port,
-            "hostname": None,
+            "hostname": str(info.get("display_name") or "") or None,
             "map": maps if isinstance(maps, str) and maps != "-" else None,
             "lighting": None,
             "gamemode": None,
             "coop_or_versus": None,
             "players": grid.get("totalPlayers"),
-            "max_players": None,
+            "max_players": info.get("player_hard_cap"),
             "bots": None,
             "ping_ms": None,
             "password_protected": None,
@@ -507,6 +544,9 @@ class DuneAdapter(DefaultAdapter):
         snap.update(
             online=True,
             players=int(grid.get("totalPlayers") or 0),
+            # 0 when Bgd.ServerPlayerHardCap is unset — Dune ships no default
+            # cap, so the UI hides the slot count rather than inventing one.
+            max_players=int(client.server_info().get("player_hard_cap") or 0),
             source="admin_http",
         )
         try:
