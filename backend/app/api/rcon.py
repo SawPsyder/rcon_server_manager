@@ -385,6 +385,12 @@ def _build_travel(db: Session, body: TravelRequest, server_type: str) -> TravelP
     gamemodes = adapter.map_gamemodes(map_row)
     if body.gamemode_key not in gamemodes:
         raise HTTPException(status_code=400, detail=f"Gamemode '{body.gamemode_key}' not available for this map")
+    lights = adapter.map_lightings(map_row)
+    if body.lighting not in lights:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Lighting '{body.lighting}' not available for this map",
+        )
     scenario = gamemodes[body.gamemode_key]
     command = adapter.build_travel_command(
         map_name=map_row.map_name,

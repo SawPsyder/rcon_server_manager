@@ -20,6 +20,7 @@ from app.schemas import (
     PublicConfig,
     ResetPasswordRequest,
     ResetPasswordResult,
+    ResetTokenCheck,
     ResetTokenStatus,
     TotpConfirmOut,
     TotpConfirmRequest,
@@ -64,6 +65,8 @@ TOTP_WINDOW = 300
 FORGOT_IP_LIMIT = 10
 FORGOT_EMAIL_LIMIT = 5
 FORGOT_WINDOW = 900
+RESET_CHECK_IP_LIMIT = 30
+RESET_CHECK_WINDOW = 300
 
 INVALID_CREDENTIALS = "Invalid email or password"
 RATE_LIMITED = "Too many attempts. Please wait a few minutes and try again."
@@ -100,34 +103,42 @@ def _email_limit(bucket: str, email: str, limit: int, window: int) -> str:
     )
 
 
+def _cookie_flags() -> dict:
+    """Attributes that must match on set and delete or browsers keep the cookie."""
+    settings = get_settings()
+    return {
+        "httponly": True,
+        "samesite": "lax",
+        "secure": settings.session_https_only,
+        "path": "/",
+    }
+
+
 def _set_session_cookie(response: Response, user: User) -> None:
     settings = get_settings()
     response.set_cookie(
         key=settings.cookie_name,
         value=create_session_token(user.id, user.token_version),
-        httponly=True,
-        samesite="lax",
-        secure=settings.session_https_only,
         max_age=settings.session_max_age,
-        path="/",
+        **_cookie_flags(),
     )
 
 
 def _set_mfa_cookie(response: Response, user: User) -> None:
-    settings = get_settings()
     response.set_cookie(
         key=MFA_COOKIE,
         value=create_mfa_token(user.id, user.token_version),
-        httponly=True,
-        samesite="lax",
-        secure=settings.session_https_only,
         max_age=MFA_TOKEN_MAX_AGE,
-        path="/",
+        **_cookie_flags(),
     )
 
 
 def _clear_mfa_cookie(response: Response) -> None:
-    response.delete_cookie(MFA_COOKIE, path="/")
+    response.delete_cookie(MFA_COOKIE, **_cookie_flags())
+
+
+def _clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(get_settings().cookie_name, **_cookie_flags())
 
 
 def user_out(db: Session, user: User) -> CurrentUserOut:
@@ -406,8 +417,7 @@ def login_totp(
 
 @router.post("/logout", response_model=AuthStatus)
 def logout(response: Response) -> AuthStatus:
-    settings = get_settings()
-    response.delete_cookie(settings.cookie_name, path="/")
+    _clear_session_cookie(response)
     _clear_mfa_cookie(response)
     return AuthStatus(authenticated=False)
 
@@ -421,7 +431,7 @@ def logout_everywhere(
     """Invalidate every session for this user, including the current one."""
     user.token_version += 1
     db.commit()
-    response.delete_cookie(get_settings().cookie_name, path="/")
+    _clear_session_cookie(response)
     _clear_mfa_cookie(response)
     return AuthStatus(authenticated=False)
 
@@ -510,10 +520,17 @@ def reset_password(
     return ResetPasswordResult(ok=True)
 
 
-@router.get("/reset-token/{token}", response_model=ResetTokenStatus)
-def check_reset_token(token: str, db: Session = Depends(get_db)) -> ResetTokenStatus:
-    """Lets the reset page show 'this link expired' before asking for a password."""
-    return ResetTokenStatus(valid=user_service.peek_token(db, token) is not None)
+@router.post("/reset-token/check", response_model=ResetTokenStatus)
+def check_reset_token(
+    body: ResetTokenCheck, request: Request, db: Session = Depends(get_db)
+) -> ResetTokenStatus:
+    """Lets the reset page show 'this link expired' before asking for a password.
+
+    POST + body rather than a path parameter: a GET /reset-token/<secret> would
+    put the live token in access logs, browser history, and Referer headers.
+    """
+    _ip_limit(request, "reset-check", RESET_CHECK_IP_LIMIT, RESET_CHECK_WINDOW)
+    return ResetTokenStatus(valid=user_service.peek_token(db, body.token) is not None)
 
 
 # --------------------------------------------------------------------------

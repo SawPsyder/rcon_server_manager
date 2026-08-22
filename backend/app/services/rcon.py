@@ -38,12 +38,22 @@ class RconTimeoutError(RconError):
 
 
 def is_command_allowed(command: str, allowed_prefixes: Iterable[str]) -> bool:
-    cmd = command.strip().lower()
+    raw = command or ""
+    # Check the unstripped string: strip() would hide a leading "\nquit".
+    if "\n" in raw or "\r" in raw:
+        return False
+    cmd = raw.strip().lower()
     if not cmd:
         return False
     first = cmd.split()[0]
     for prefix in allowed_prefixes:
-        if first == prefix or first.startswith(prefix):
+        p = prefix.lower()
+        # Trailing-dot entries are families (Satisfactory `fg.` / `server.`).
+        # Everything else is an exact verb so `ban` does not match `banhammer`.
+        if p.endswith("."):
+            if first.startswith(p):
+                return True
+        elif first == p:
             return True
     return False
 
@@ -256,6 +266,8 @@ def run_rcon(
     By default uses the process-wide persistent connection pool (one TCP
     session per host:port:password) to avoid Sandstorm's per-connect thread leak.
     """
+    if "\n" in command or "\r" in command:
+        raise RconError("Command must be a single line")
     if allowed_prefixes is not None and not is_command_allowed(command, allowed_prefixes):
         raise RconError(
             "Command not allowed. Allowed prefixes: " + ", ".join(allowed_prefixes)

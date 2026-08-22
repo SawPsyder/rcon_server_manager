@@ -204,6 +204,22 @@ class ServerTypeAdapter(Protocol):
         ...
 
 
+_RCON_UNSAFE = frozenset('"\n\r\x00;')
+
+
+def _rcon_arg(value: str) -> str:
+    """Strip quote/newline/control characters from an interpolated RCON argument.
+
+    Source RCON sends one string per packet. A player name containing `"` or a
+    newline can close the quoted argument and run a second verb (`quit`) if the
+    game console splits on those. Palworld/Dune already quote via shlex; this is
+    the Sandstorm default path.
+    """
+    return "".join(
+        ch for ch in (value or "") if ch not in _RCON_UNSAFE and ord(ch) >= 32
+    )
+
+
 class DefaultAdapter:
     """Source-engine defaults: A2S status queries and Source RCON commands.
 
@@ -241,7 +257,8 @@ class DefaultAdapter:
             secret,
             command,
             timeout=timeout,
-            allowed_prefixes=self.allowed_rcon_prefixes or None,
+            # Empty tuple must stay a tuple: `or None` would skip the allowlist.
+            allowed_prefixes=self.allowed_rcon_prefixes,
         )
 
     def invalidate_connections(self, host: str, port: int) -> None:
@@ -317,21 +334,21 @@ class DefaultAdapter:
     # display name) override these; the defaults are the Source RCON forms.
 
     def build_say_command(self, message: str) -> str:
-        return f"say {message}"
+        return f"say {_rcon_arg(message)}"
 
     def build_kick_command(self, *, player_name: str, net_id: str, reason: str) -> str:
-        return f'kick "{player_name}" "{reason}"'
+        return f'kick "{_rcon_arg(player_name)}" "{_rcon_arg(reason)}"'
 
     def build_ban_command(
         self, *, player_name: str, net_id: str, reason: str, minutes: int
     ) -> str:
-        return f'ban "{player_name}" "{minutes}" "{reason}"'
+        return f'ban "{_rcon_arg(player_name)}" "{int(minutes)}" "{_rcon_arg(reason)}"'
 
     def build_permban_command(self, *, player_name: str, net_id: str, reason: str) -> str:
-        return f'permban "{player_name}" "{reason}"'
+        return f'permban "{_rcon_arg(player_name)}" "{_rcon_arg(reason)}"'
 
     def build_unban_command(self, net_id: str) -> str:
-        return f'unban "{net_id}"'
+        return f'unban "{_rcon_arg(net_id)}"'
 
     def parse_bans(self, text: str) -> list[dict[str, Any]]:
         return []

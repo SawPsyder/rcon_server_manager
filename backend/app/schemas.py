@@ -61,6 +61,12 @@ class ResetTokenStatus(BaseModel):
     valid: bool
 
 
+class ResetTokenCheck(BaseModel):
+    """Token in the body so it never lands in a URL, access log, or Referer."""
+
+    token: str = Field(min_length=1, max_length=256)
+
+
 class CurrentUserOut(BaseModel):
     id: int
     email: str
@@ -873,15 +879,15 @@ class RconCommandResponse(BaseModel):
 
 
 class PlayerActionRequest(BaseModel):
-    player_name: str = Field(min_length=1)
-    reason: str = ""
+    player_name: str = Field(min_length=1, max_length=128)
+    reason: str = Field(default="", max_length=200)
     ban_minutes: int | None = Field(default=None, ge=1)
     # Platform net id when known (SteamID64, SteamNWI:…, EOS:…)
-    net_id: str = ""
+    net_id: str = Field(default="", max_length=64)
 
 
 class UnbanRequest(BaseModel):
-    net_id: str = Field(min_length=1)
+    net_id: str = Field(min_length=1, max_length=64)
 
 
 class PlayerActionLogOut(BaseModel):
@@ -1012,9 +1018,16 @@ class AdminSayRequest(BaseModel):
 
 class TravelRequest(BaseModel):
     map_id: int
-    gamemode_key: str
-    lighting: str = "Day"
+    gamemode_key: str = Field(min_length=1, max_length=64)
+    lighting: str = Field(default="Day", min_length=1, max_length=32)
     execute: bool = True
+
+    @field_validator("lighting", "gamemode_key")
+    @classmethod
+    def _no_control_chars(cls, value: str) -> str:
+        if any(ch in value for ch in "\n\r\x00?;"):
+            raise ValueError("contains characters that cannot appear in a travel command")
+        return value
 
 
 class TravelPreview(BaseModel):

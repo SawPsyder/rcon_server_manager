@@ -148,8 +148,31 @@ def test_invalidate_connections_hits_the_rcon_pool(monkeypatch):
 def test_command_allowlist_behaviour():
     assert sandstorm_adapter.is_command_allowed("listplayers") is True
     assert sandstorm_adapter.is_command_allowed("BAN foo") is True
+    assert sandstorm_adapter.is_command_allowed("banid SteamNWI:1") is True
     assert sandstorm_adapter.is_command_allowed("") is False
     assert sandstorm_adapter.is_command_allowed("shutdown") is False
+    # Prefix matching used to allow any first token that started with "ban".
+    assert sandstorm_adapter.is_command_allowed("banhammer x") is False
+    assert sandstorm_adapter.is_command_allowed('kick "x"\nquit') is False
+    assert sandstorm_adapter.is_command_allowed("\nlistplayers") is False
+    assert sandstorm_adapter.is_command_allowed("listplayers\n") is False
+    # Dotted families (Satisfactory `fg.`) still match as prefixes.
+    from app.server_types.satisfactory import satisfactory_adapter
+
+    assert satisfactory_adapter.is_command_allowed("FG.AutosaveInterval 600") is True
+    assert satisfactory_adapter.is_command_allowed("kick Alice") is False
+
+
+def test_moderation_builders_strip_quotes_and_newlines():
+    a = sandstorm_adapter
+    assert (
+        a.build_kick_command(
+            player_name='Bob"\nquit', net_id="1", reason='bye"; permban x'
+        )
+        == 'kick "Bobquit" "bye permban x"'
+    )
+    assert a.build_say_command("hello\nquit") == "say helloquit"
+    assert a.build_unban_command('7656"; quit') == 'unban "7656 quit"'
 
 
 # --- pure parsers ---------------------------------------------------------

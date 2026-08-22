@@ -28,7 +28,7 @@ from app.api import (
 )
 from app.bootstrap import ensure_admin, seed_if_empty
 from app.database import Base, SessionLocal, engine, wait_for_database
-from app.deps import get_current_user, require_server_scope
+from app.deps import AdminUser, get_current_user, require_server_scope
 from app.migrate import run_migrations
 from app.services.pterodactyl_poller import poller as pterodactyl_poller
 from app.services.schedule_runner import runner as schedule_runner
@@ -83,6 +83,17 @@ app.include_router(server_pterodactyl.router, dependencies=SCOPED)
 
 @app.on_event("startup")
 def on_startup() -> None:
+    from app.config import get_settings
+
+    settings = get_settings()
+    if settings.secret_key in {"", "dev-secret-change-me"}:
+        # Forgeable sessions if this ships to a real host with the baked default.
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "SECRET_KEY is the insecure default. Set SECRET_KEY to a long random "
+            "value before exposing this process to a network."
+        )
     wait_for_database()
     Base.metadata.create_all(bind=engine)
     run_migrations(engine)
@@ -115,8 +126,7 @@ def on_shutdown() -> None:
     panel_registry.invalidate_all()
 
 
-@app.get("/api/health")
-def health() -> dict:
+def _pool_stats() -> dict:
     from app.config import get_settings
     from app.services.dune_api import dune_pool
     from app.services.palworld_api import palworld_pool
@@ -134,6 +144,18 @@ def health() -> dict:
         "dune_sessions": dune_pool.stats(),
         "pterodactyl_sessions": panel_registry.stats(),
     }
+
+
+@app.get("/api/health")
+def health() -> dict:
+    """Liveness only. Pool hosts, ports, and last_error stay off this payload."""
+    return {"status": "ok"}
+
+
+@app.get("/api/health/details")
+def health_details(_admin: AdminUser) -> dict:
+    """Live connection-pool stats. Admin-only: hosts and last_error are recon."""
+    return _pool_stats()
 
 
 def _resolve_static_dir() -> Path | None:

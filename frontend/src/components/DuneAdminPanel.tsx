@@ -167,6 +167,17 @@ export default function DuneAdminPanel({ serverId, onChanged, players = [] }: Pr
   }, [run, serverId]);
 
   useEffect(() => {
+    setGrid(null);
+    setParts([]);
+    setSettings(null);
+    setDrafts({});
+    setMarkers([]);
+    setLocations([]);
+    setError("");
+    setNotice("");
+  }, [serverId]);
+
+  useEffect(() => {
     if (tab === "map") void loadMap();
     if (tab === "instances" && grid === null) void loadInstances();
     if (tab === "settings" && settings === null) void loadSettings();
