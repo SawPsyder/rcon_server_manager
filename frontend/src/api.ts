@@ -527,8 +527,11 @@ export function parseIdentity(netId: string): { platform: string; external_id: s
   if (!raw) return null;
   const steamNwi = raw.match(/^SteamNWI:(\d{17})$/i);
   if (steamNwi) return { platform: "steam", external_id: steamNwi[1] };
+  if (/^EOS:/i.test(raw)) {
+    const eos = raw.slice(4).trim();
+    return eos ? { platform: "eos", external_id: eos } : null;
+  }
   if (/^\d{17}$/.test(raw)) return { platform: "steam", external_id: raw };
-  if (/^EOS:/i.test(raw)) return { platform: "eos", external_id: raw.slice(4) };
 
   // Before the loose 17-digit search below: an Xbox id that happens to be 17
   // digits must not be filed as a Steam account and sent to the Steam Web API.
@@ -536,11 +539,13 @@ export function parseIdentity(netId: string): { platform: string; external_id: s
   if (prefixed) {
     const platform = PLATFORM_PREFIXES[prefixed[1].toLowerCase()];
     if (platform) return { platform, external_id: prefixed[2] };
+    return null;
   }
 
-  const anySteam = raw.match(/(\d{17})/);
+  // Same standalone-17-digit rule as backend parse_net_id.
+  const anySteam = raw.match(/(?<!\d)(\d{17})(?!\d)/);
   if (anySteam) return { platform: "steam", external_id: anySteam[1] };
-  return { platform: "unknown", external_id: raw };
+  return null;
 }
 
 export function identityKey(platform: string, externalId: string): string {
@@ -873,13 +878,14 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const { headers: initHeaders, ...rest } = init || {};
   const res = await fetch(path, {
     credentials: "include",
+    ...rest,
     headers: {
       "Content-Type": "application/json",
-      ...(init?.headers || {}),
+      ...(initHeaders || {}),
     },
-    ...init,
   });
   if (!res.ok) {
     let detail = res.statusText;
@@ -1036,9 +1042,10 @@ export const api = {
       body: JSON.stringify({ token, password }),
     }),
   checkResetToken: (token: string) =>
-    request<{ valid: boolean }>(
-      `/api/auth/reset-token/${encodeURIComponent(token)}`,
-    ),
+    request<{ valid: boolean }>("/api/auth/reset-token/check", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
   deleteIdentityNote: (noteId: number) =>
     request<void>(`/api/identities/notes/${noteId}`, { method: "DELETE" }),
 

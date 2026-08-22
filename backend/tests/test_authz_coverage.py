@@ -25,7 +25,7 @@ PUBLIC_PATHS = {
     "/api/auth/logout",
     "/api/auth/forgot-password",
     "/api/auth/reset-password",
-    "/api/auth/reset-token/{token}",
+    "/api/auth/reset-token/check",
     # Deliberate public read-only share links.
     "/api/public/charts/{token}/meta",
     "/api/public/charts/{token}/stats",
@@ -110,6 +110,7 @@ def test_connection_settings_routes_are_admin_only():
         # These two rotate servers.rcon_password_enc from inside the game panel.
         ("POST", "/api/servers/{server_id}/satisfactory/passwords/admin"),
         ("POST", "/api/servers/{server_id}/satisfactory/claim"),
+        ("GET", "/api/health/details"),
     }
     seen = set()
     for route in _api_routes():

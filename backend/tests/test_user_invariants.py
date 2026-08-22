@@ -270,6 +270,21 @@ def test_unlock_clears_lock_and_counter(db):
     assert user_service.is_temporarily_locked(user) is False
 
 
+def test_expired_lockout_starts_a_fresh_failure_streak(db):
+    from datetime import timedelta
+
+    user = _user(db)
+    for _ in range(user_service.LOCKOUT_THRESHOLD):
+        user_service.record_failed_login(user)
+    user.locked_until = utcnow() - timedelta(seconds=1)
+    db.commit()
+
+    assert user_service.is_temporarily_locked(user) is False
+    assert user_service.record_failed_login(user) is False
+    assert user.failed_logins == 1
+    assert user_service.is_temporarily_locked(user) is False
+
+
 def test_set_password_clears_lock(db):
     user = _user(db)
     for _ in range(user_service.LOCKOUT_THRESHOLD):

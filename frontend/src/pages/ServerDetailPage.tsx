@@ -344,6 +344,9 @@ export default function ServerDetailPage() {
         online: false,
         host: prev?.host || "",
         query_port: prev?.query_port || 0,
+        server_type: prev?.server_type,
+        features: prev?.features,
+        extra: prev?.extra,
         hostname: prev?.hostname,
         map: prev?.map,
         lighting: prev?.lighting,
@@ -785,8 +788,8 @@ export default function ServerDetailPage() {
                 className="btn"
                 disabled={!selectedPlayer || busy || !validServerId}
                 onClick={() => {
-                  const reason = prompt("Kick reason", "Kicked by admin") || "";
-                  if (!validServerId || !selectedPlayer) return;
+                  const reason = prompt("Kick reason", "Kicked by admin");
+                  if (reason == null || !validServerId || !selectedPlayer) return;
                   setBusy(true);
                   api
                     .kick(validServerId, selectedPlayer, reason, selectedNetId)
@@ -795,6 +798,7 @@ export default function ServerDetailPage() {
                       refreshStatus();
                       if (selectedNetId) refreshIdentityFlags([selectedNetId]);
                     })
+                    .catch((e) => setOutput(e instanceof Error ? e.message : String(e)))
                     .finally(() => setBusy(false));
                 }}
               >
@@ -805,9 +809,15 @@ export default function ServerDetailPage() {
                   className="btn"
                   disabled={!selectedPlayer || busy || !validServerId}
                   onClick={() => {
-                    const minutes = Number(prompt("Ban minutes", "60") || "60");
-                    const reason = prompt("Ban reason", "Banned by admin") || "";
-                    if (!validServerId || !selectedPlayer) return;
+                    const minutesRaw = prompt("Ban minutes", "60");
+                    if (minutesRaw == null) return;
+                    const minutes = Math.floor(Number(minutesRaw));
+                    if (!Number.isFinite(minutes) || minutes < 1) {
+                      setOutput("Ban minutes must be a positive number.");
+                      return;
+                    }
+                    const reason = prompt("Ban reason", "Banned by admin");
+                    if (reason == null || !validServerId || !selectedPlayer) return;
                     setBusy(true);
                     api
                       .ban(validServerId, selectedPlayer, minutes, reason, selectedNetId)
@@ -816,6 +826,7 @@ export default function ServerDetailPage() {
                         refreshStatus();
                         if (selectedNetId) refreshIdentityFlags([selectedNetId]);
                       })
+                      .catch((e) => setOutput(e instanceof Error ? e.message : String(e)))
                       .finally(() => setBusy(false));
                   }}
                 >
@@ -828,8 +839,8 @@ export default function ServerDetailPage() {
                   disabled={!selectedPlayer || busy || !validServerId}
                   onClick={() => {
                     if (!confirm(`Permban ${selectedPlayer}?`)) return;
-                    const reason = prompt("Reason", "Permanently banned") || "";
-                    if (!validServerId || !selectedPlayer) return;
+                    const reason = prompt("Reason", "Permanently banned");
+                    if (reason == null || !validServerId || !selectedPlayer) return;
                     setBusy(true);
                     api
                       .permban(validServerId, selectedPlayer, reason, selectedNetId)
@@ -838,6 +849,7 @@ export default function ServerDetailPage() {
                         refreshStatus();
                         if (selectedNetId) refreshIdentityFlags([selectedNetId]);
                       })
+                      .catch((e) => setOutput(e instanceof Error ? e.message : String(e)))
                       .finally(() => setBusy(false));
                   }}
                 >
@@ -935,6 +947,10 @@ export default function ServerDetailPage() {
                 disabled={!validServerId || !mapId || !gamemode || busy}
                 onClick={() => {
                   if (!validServerId || !mapId || !gamemode) return;
+                  const mapLabel = selectedMap?.alias || selectedMap?.map_name || "this map";
+                  if (!confirm(`Change the live map to ${mapLabel} (${gamemode}, ${lighting})?`)) {
+                    return;
+                  }
                   setBusy(true);
                   api
                     .travel(validServerId, {
@@ -947,6 +963,7 @@ export default function ServerDetailPage() {
                       showResult("Travel", r);
                       setTimeout(refreshStatus, 2000);
                     })
+                    .catch((e) => setOutput(e instanceof Error ? e.message : String(e)))
                     .finally(() => setBusy(false));
                 }}
               >
@@ -1006,6 +1023,7 @@ export default function ServerDetailPage() {
 
       {AdminPanel && validServerId && (
         <AdminPanel
+          key={validServerId}
           serverId={validServerId}
           onChanged={refreshStatus}
           players={status?.player_list}

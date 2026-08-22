@@ -210,8 +210,14 @@ def lockout_detail(user: User) -> str:
 def record_failed_login(user: User) -> bool:
     """Increment failure counter; lock when the threshold is reached.
 
-    Returns True if the account is (now) temporarily locked.
+    Returns True if the account is (now) temporarily locked. An expired
+    lockout starts a fresh streak - otherwise a single miss after waiting
+    out the window would lock the account again immediately.
     """
+    until = _aware(user.locked_until)
+    if until is not None and until <= utcnow():
+        user.failed_logins = 0
+        user.locked_until = None
     user.failed_logins = int(user.failed_logins or 0) + 1
     if user.failed_logins >= LOCKOUT_THRESHOLD:
         user.locked_until = utcnow() + timedelta(minutes=LOCKOUT_MINUTES)
@@ -340,13 +346,17 @@ def issue_token(db: Session, user: User, purpose: str, requested_ip: str = "") -
 
 
 def _lookup_live_token(
-    db: Session, raw: str, purpose: str | None = None
+    db: Session, raw: str, purpose: str | None = None, *, for_update: bool = False
 ) -> tuple[AuthToken, User] | None:
     """Return (token row, user) when the raw token is still redeemable."""
     if not raw:
         return None
 
-    row = db.query(AuthToken).filter(AuthToken.token_hash == hash_url_token(raw)).first()
+    query = db.query(AuthToken).filter(AuthToken.token_hash == hash_url_token(raw))
+    if for_update:
+        # Serialise redeem so two parallel POSTs cannot both see used_at IS NULL.
+        query = query.with_for_update()
+    row = query.first()
     if row is None or row.used_at is not None:
         return None
     if purpose is not None and row.purpose != purpose:
@@ -376,11 +386,21 @@ def consume_token(db: Session, raw: str, purpose: str | None = None) -> User:
     invalid = HTTPException(
         status.HTTP_400_BAD_REQUEST, detail="This link is invalid or has expired"
     )
-    found = _lookup_live_token(db, raw, purpose)
+    found = _lookup_live_token(db, raw, purpose, for_update=True)
     if found is None:
         raise invalid
     row, user = found
-    row.used_at = utcnow()
+    # SELECT FOR UPDATE is a no-op on SQLite. An UPDATE ... WHERE used_at IS NULL
+    # is atomic on both SQLite and Postgres, so two parallel POSTs cannot both
+    # redeem the same link.
+    burned = (
+        db.query(AuthToken)
+        .filter(AuthToken.id == row.id, AuthToken.used_at.is_(None))
+        .update({AuthToken.used_at: utcnow()}, synchronize_session="fetch")
+    )
+    if not burned:
+        raise invalid
+    db.flush()
     return user
 
 

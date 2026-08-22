@@ -5,17 +5,28 @@ from __future__ import annotations
 import secrets
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.servers import get_server_or_404
 from app.api.stats import PublicPlayerStatsOut, build_player_stats, to_public_stats
 from app.database import get_db
+from app.deps import client_ip
 from app.models import ChartShare, Server, utcnow
+from app.services import rate_limit
 
 admin_router = APIRouter(prefix="/api/servers", tags=["chart-share"])
 public_router = APIRouter(prefix="/api/public/charts", tags=["public-charts"])
+
+PUBLIC_SHARE_LIMIT = 40
+PUBLIC_SHARE_WINDOW = 60
+
+
+def _limit_public(request: Request) -> None:
+    ip = client_ip(request) or "unknown"
+    if not rate_limit.check(f"public-share:ip:{ip}", PUBLIC_SHARE_LIMIT, PUBLIC_SHARE_WINDOW):
+        raise HTTPException(status_code=429, detail="Too many requests")
 
 
 class ChartShareOut(BaseModel):
@@ -105,8 +116,10 @@ def revoke_chart_share(
 @public_router.get("/{token}/meta", response_model=PublicChartMeta)
 def public_chart_meta(
     token: str,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> PublicChartMeta:
+    _limit_public(request)
     row = _get_share_by_token(db, token)
     server = db.get(Server, row.server_id)
     if not server:
@@ -117,9 +130,11 @@ def public_chart_meta(
 @public_router.get("/{token}/stats", response_model=PublicPlayerStatsOut)
 def public_chart_stats(
     token: str,
+    request: Request,
     range: str = Query(default="24h", pattern="^(24h|7d|30d|180d|1y)$"),
     db: Session = Depends(get_db),
 ) -> PublicPlayerStatsOut:
+    _limit_public(request)
     row = _get_share_by_token(db, token)
     if not db.get(Server, row.server_id):
         raise HTTPException(status_code=404, detail="Not found")

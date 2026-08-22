@@ -211,6 +211,13 @@ export default function PalworldAdminPanel({ serverId, onChanged }: Props) {
   }, [run, serverId]);
 
   useEffect(() => {
+    setWorld(null);
+    setSettings(null);
+    setError("");
+    setNotice("");
+  }, [serverId]);
+
+  useEffect(() => {
     if (tab === "world" && world === null) void loadWorld();
     if (tab === "settings" && settings === null) loadSettings();
   }, [tab, world, settings, loadWorld, loadSettings]);

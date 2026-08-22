@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { api, PalworldWorld } from "../api";
+import { api, ApiError, PalworldWorld } from "../api";
 import PalworldWorldMap, { MapSelection } from "../components/PalworldWorldMap";
 
 /** Public share polls a bit slower than admin follow mode. */
@@ -13,6 +13,8 @@ export default function SharedMapPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<MapSelection>(null);
+  const worldRef = useRef<PalworldWorld | null>(null);
+  worldRef.current = world;
 
   const loadWorld = useCallback(async () => {
     if (!token) return;
@@ -21,7 +23,18 @@ export default function SharedMapPage() {
       setWorld(data);
       setError("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const status = e instanceof ApiError ? e.status : 0;
+      const message = e instanceof Error ? e.message : String(e);
+      if (status === 404 || status === 403) {
+        // Share was revoked or never valid — do not keep serving a stale overlay.
+        setWorld(null);
+        setError("This map link is invalid, revoked, or the server is offline.");
+        return;
+      }
+      // Keep the last snapshot up so a single timeout does not blank an overlay.
+      if (!worldRef.current) {
+        setError(message);
+      }
     }
   }, [token]);
 
@@ -54,13 +67,14 @@ export default function SharedMapPage() {
     };
   }, [token]);
 
+  const canPoll = Boolean(world?.enabled);
   useEffect(() => {
-    if (!token || loading || error) return;
+    if (!token || loading || !canPoll) return;
     const id = window.setInterval(() => {
       void loadWorld();
     }, SHARE_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [token, loading, error, loadWorld]);
+  }, [token, loading, canPoll, loadWorld]);
 
   if (!token) {
     return (
@@ -79,13 +93,13 @@ export default function SharedMapPage() {
     );
   }
 
-  if (error || !world) {
+  if (!world) {
     return (
       <div className="shared-map-page">
         <div className="card" style={{ maxWidth: 420, margin: "2rem auto" }}>
           <h1 className="shared-chart-title">Unavailable</h1>
           <p className="muted" style={{ margin: 0 }}>
-            This map link is invalid, revoked, or the server is offline.
+            {error || "This map link is invalid, revoked, or the server is offline."}
           </p>
         </div>
       </div>
